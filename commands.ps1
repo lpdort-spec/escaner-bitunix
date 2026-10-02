@@ -165,6 +165,7 @@ $script:HelpText = @"
 /precio SIMBOLO · precio rápido
 /resultados · aciertos reales de las señales del bot
 /ayuda · esta ayuda
+/id · muestra el identificador del chat
 
 En el grupo escribe / y elige el comando del menú del bot (así Telegram añade el nombre del bot solo).
 Qué datos usa: Bitunix (cripto en futuros), Yahoo Finance (bolsa) y CoinGecko (otras criptos). Cada informe cita su fuente y la fecha del dato.
@@ -177,7 +178,9 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
     foreach ($up in $u.result) {
         Set-Content $offsetFile ([string]($up.update_id + 1))
         $m = $up.message; if (-not $m -or -not $m.text) { continue }
-        $chat = "$($m.chat.id)"; if ($chat -notin $allowedChats) { continue }
+        $chat = "$($m.chat.id)"
+        if ($m.text.Trim().ToLower() -match '^/id(@\w+)?$') { Send-Tg $token $chat ("🆔 Identificador de este chat: {0} (tipo: {1}). Si quieres que el bot envíe aquí las señales, díselo a Luis." -f $chat, $m.chat.type) $m.message_id; continue }
+        if ($chat -notin $allowedChats) { continue }
         $t = $m.text.Trim(); if (-not $t.StartsWith("/")) { continue }
         $parts = $t -split '\s+'; $cmd = ($parts[0] -replace '@.*$', '').ToLower(); $args1 = @($parts | Select-Object -Skip 1)
         $key = "$chat"; if ($script:LastCmd[$key] -and ((Get-Date) - $script:LastCmd[$key]).TotalSeconds -lt 12) { Send-Tg $token $chat "Un momento, voy con una petición cada pocos segundos. Repite en unos segundos." $m.message_id; continue }

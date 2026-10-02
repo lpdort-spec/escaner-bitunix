@@ -33,7 +33,10 @@ if ($StateFile -and (Test-Path $StateFile)) { foreach ($k in @(Get-Content $Stat
 . (Join-Path $PSScriptRoot "tracker.ps1")
 $hasCmds = $false
 if (Test-Path (Join-Path $PSScriptRoot "commands.ps1")) { . (Join-Path $PSScriptRoot "commands.ps1"); $hasCmds = $true }
-$allowedChats = @($TelegramChatId -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$TelegramSignalChatId = $env:TELEGRAM_SIGNAL_CHAT_ID
+if (-not $TelegramSignalChatId -and (Test-Path $cfg)) { try { $TelegramSignalChatId = (Get-Content $cfg -Raw | ConvertFrom-Json).signalChatId } catch {} }
+$sigChats = @($(if ($TelegramSignalChatId) { $TelegramSignalChatId } else { $TelegramChatId }) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })       # destinos de las señales
+$allowedChats = @(($TelegramChatId + "," + $TelegramSignalChatId) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)   # chats que pueden dar órdenes al bot
 $offsetFile = Join-Path $PSScriptRoot "bot-offset.txt"
 $script:cmdTick = 0
 function Poll-Commands { if ($hasCmds -and $TelegramToken -and $allowedChats.Count) { try { Handle-Commands $TelegramToken $allowedChats $offsetFile } catch {} } }
@@ -124,7 +127,7 @@ function Send-Alert($key, $msg, $photo = $null) {
     Add-Content -Path $log -Value $line
     try { [console]::Beep(1000, 300) } catch {}
     if ($TelegramToken -and $TelegramChatId) {
-        foreach ($cid in ($TelegramChatId -split ',')) {          # varios destinos: chat privado, grupo o canal
+        foreach ($cid in $sigChats) {          # destinos de las señales: solo el grupo privado de futuros (o todos si no se ha configurado)
             $cid = $cid.Trim(); if (-not $cid) { continue }
             $sent = $false
             if ($photo -and $hasChart -and $msg.Length -le 1000) { $sent = Send-TelegramPhoto $TelegramToken $cid $photo $msg }
@@ -313,8 +316,8 @@ function Send-DailyReport {
     $rep = Get-Report
     Set-Content $f ([datetime]::UtcNow.ToString("o"))
     Write-Host $rep -ForegroundColor Cyan
-    if ($TelegramToken -and $TelegramChatId -and (@(Read-Signals).Count -gt 0)) {
-        foreach ($cid in ($TelegramChatId -split ',')) {
+    if ($TelegramToken -and $sigChats.Count -and (@(Read-Signals).Count -gt 0)) {
+        foreach ($cid in $sigChats) {
             try { $json = @{ chat_id = $cid.Trim(); text = $rep } | ConvertTo-Json -Compress; Invoke-RestMethod "https://api.telegram.org/bot$TelegramToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($json)) | Out-Null } catch {}
         }
     }
