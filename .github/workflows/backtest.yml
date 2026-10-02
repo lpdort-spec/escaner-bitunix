@@ -1,0 +1,35 @@
+name: Backtest semanal
+
+on:
+  schedule:
+    - cron: "0 5 * * 1"          # cada lunes a las 05:00 UTC
+  workflow_dispatch:              # permite lanzarlo a mano desde la pestaña Actions
+
+permissions:
+  contents: write                 # para guardar el historial del backtest
+
+concurrency:
+  group: backtest
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Backtest con datos reales de Bitunix
+        shell: powershell
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TELEGRAM_SIGNAL_CHAT_ID: ${{ secrets.TELEGRAM_SIGNAL_CHAT_ID }}
+        run: ./backtest.ps1 -Weekly -TopN 50 -Refresh
+      - name: Guardar historial
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "escaner"
+          git config user.email "escaner@users.noreply.github.com"
+          for f in backtest-history.jsonl backtest-ultimo.txt; do [ -f "$f" ] && git add "$f"; done
+          git diff --cached --quiet || (git commit -m "backtest semanal" && git pull --rebase -q && git push)
