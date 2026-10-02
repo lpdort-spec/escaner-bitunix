@@ -1,18 +1,26 @@
-﻿# Escáner de rupturas tempranas en futuros Bitunix. Solo datos públicos, no opera.
-# Detecta la vela en la que el precio SALE de un rango con volumen (no la consolidación ni el movimiento ya hecho).
+﻿# Escáner de futuros Bitunix: rupturas con retesteo y barridos de liquidez de ALTO POTENCIAL. Solo datos públicos, no opera.
 #   Local:  powershell -ExecutionPolicy Bypass -File scanner.ps1 -EverySeconds 120 -StateFile local-seen.json
 #   Una pasada:  ... -Once
 param(
-    [string[]]$Interval = @("15m", "1h"),   # temporalidades de detección
-    [int]$TopN = 100,               # nº de pares con más volumen 24h
-    [double]$VolMult = 2.5,         # volumen de la vela >= X veces la media de las 20 anteriores
-    [int]$Lookback = 20,            # velas del rango que se rompe
-    [double]$MaxExt = 1.2,          # la ruptura no puede haberse alejado más de X ATR del rango (si no, ya es tarde)
+    [string[]]$Interval = @("1h", "4h"),
+    [int]$TopN = 100,
+    [double]$VolMult = 2.0,         # volumen de la vela >= X veces la media de las 20 anteriores
+    [int]$Lookback = 20,            # velas del rango cuya liquidez se rompe o barre
+    [double]$MaxExt = 1.2,          # ruptura: máximo alejamiento del nivel en ATR (si no, ya es tarde)
     [double]$MaxAgeFactor = 1.5,    # solo avisa si la vela cerró hace <= X veces su duración
+    [string[]]$Strategies = @("ruptura"),
+    [double]$MinSlPct = 1.0,        # SL mínimo en % del precio (las comisiones se comen los SL pequeños)
+    [double]$MinRoiTp2 = 25,        # ganancia mínima en TP2 sobre el margen (%) con el apalancamiento recomendado
+    [double]$MaxFeeShare = 20,      # descarta si las comisiones superan este % de la ganancia en TP1
+    [double]$FeeRT = 0.10,          # comisiones + deslizamiento de ida y vuelta (% del nominal, órdenes limit)
     [int]$EverySeconds = 120,
     [string]$TelegramToken = "",
     [string]$TelegramChatId = "",
-    [string]$StateFile = "",        # evita repetir alertas entre ejecuciones
+    [double]$MaxMargin = 200,       # margen máximo por operación (USDT)
+    [double]$MaxLossPct = 35,       # el SL nunca debe perder más de este % del margen
+    [string]$StateFile = "",
+    [int]$MaxMinutes = 0,           # 0 = sin límite; en la nube se limita a ~5h45 y el siguiente turno continúa
+    [switch]$NoChart,
     [switch]$Once
 )
 $base = "https://fapi.bitunix.com/api/v1/futures/market"
@@ -20,11 +28,19 @@ $log = Join-Path $PSScriptRoot "alertas.log"
 $seen = @{}
 if (-not $TelegramToken -and $env:TELEGRAM_TOKEN) { $TelegramToken = $env:TELEGRAM_TOKEN; $TelegramChatId = $env:TELEGRAM_CHAT_ID }
 $cfg = Join-Path $PSScriptRoot "telegram.json"
-if (-not $TelegramToken -and (Test-Path $cfg)) {
-    $c = Get-Content $cfg -Raw | ConvertFrom-Json
-    $TelegramToken = $c.token; $TelegramChatId = $c.chatId
-}
+if (-not $TelegramToken -and (Test-Path $cfg)) { $c = Get-Content $cfg -Raw | ConvertFrom-Json; $TelegramToken = $c.token; $TelegramChatId = $c.chatId }
 if ($StateFile -and (Test-Path $StateFile)) { foreach ($k in @(Get-Content $StateFile -Raw | ConvertFrom-Json)) { $seen[$k] = $true } }
+. (Join-Path $PSScriptRoot "tracker.ps1")
+$hasCmds = $false
+if (Test-Path (Join-Path $PSScriptRoot "commands.ps1")) { . (Join-Path $PSScriptRoot "commands.ps1"); $hasCmds = $true }
+$allowedChats = @($TelegramChatId -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$offsetFile = Join-Path $PSScriptRoot "bot-offset.txt"
+$script:cmdTick = 0
+function Poll-Commands { if ($hasCmds -and $TelegramToken -and $allowedChats.Count) { try { Handle-Commands $TelegramToken $allowedChats $offsetFile } catch {} } }
+$hasChart = $false
+if (-not $NoChart -and (Test-Path (Join-Path $PSScriptRoot "chart.ps1")) -and $PSVersionTable.PSEdition -ne 'Core') { . (Join-Path $PSScriptRoot "chart.ps1"); $hasChart = $true }
+$trendCache = @{}; $drCache = @{}; $fundCache = $null; $fundAt = [datetime]::MinValue
+$W1 = $script:W1; $W2 = $script:W2; $W3 = $script:W3
 
 function Get-Rsi($closes, $n = 14) {
     if ($closes.Count -le $n) { return $null }
@@ -33,20 +49,13 @@ function Get-Rsi($closes, $n = 14) {
     $g /= $n; $l /= $n
     for ($i = $n + 1; $i -lt $closes.Count; $i++) {
         $d = $closes[$i] - $closes[$i-1]
-        $g = ($g * ($n - 1) + [Math]::Max($d, 0)) / $n
-        $l = ($l * ($n - 1) + [Math]::Max(-$d, 0)) / $n
+        $g = ($g * ($n - 1) + [Math]::Max($d, 0)) / $n; $l = ($l * ($n - 1) + [Math]::Max(-$d, 0)) / $n
     }
     if ($l -eq 0) { return 100 }
     return 100 - 100 / (1 + $g / $l)
 }
-
-function Get-Ema($vals, $n) {
-    $k = 2.0 / ($n + 1); $e = $vals[0]
-    for ($i = 1; $i -lt $vals.Count; $i++) { $e = $vals[$i] * $k + $e * (1 - $k) }
-    return $e
-}
-
-function Get-Atr($c, $from, $to) {          # media del rango verdadero de c[from..to]
+function Get-Ema($vals, $n) { $k = 2.0 / ($n + 1); $e = $vals[0]; for ($i = 1; $i -lt $vals.Count; $i++) { $e = $vals[$i] * $k + $e * (1 - $k) }; return $e }
+function Get-Atr($c, $from, $to) {
     $s = 0.0; $n = 0
     for ($i = $from; $i -le $to; $i++) {
         $h = [double]$c[$i].high; $l = [double]$c[$i].low; $pc = [double]$c[$i-1].close
@@ -54,49 +63,100 @@ function Get-Atr($c, $from, $to) {          # media del rango verdadero de c[fro
     }
     return $s / $n
 }
-
-function Get-Trend4h($symbol) {             # "alcista" / "bajista" según EMA21 en 4h
+function Get-TrendHtf($symbol, $iv) {            # tendencia en la temporalidad superior (1h -> 4h, 4h -> 1d)
+    $htf = if ($iv -eq "4h") { "1d" } else { "4h" }
+    $key = "$symbol-$htf"
+    if ($trendCache[$key] -and ((Get-Date) - $trendCache[$key].at).TotalMinutes -lt 20) { return $trendCache[$key].v }
+    $v = "?"
     try {
-        $k = (Invoke-RestMethod "$base/kline?symbol=$symbol&interval=4h&limit=60").data | Sort-Object { [long]$_.time }
+        $k = (Invoke-RestMethod "$base/kline?symbol=$symbol&interval=$htf&limit=60").data | Sort-Object { [long]$_.time }
         $cl = @($k[0..($k.Count - 2)] | ForEach-Object { [double]$_.close })
         $ema = Get-Ema $cl 21; $emaPrev = Get-Ema $cl[0..($cl.Count - 4)] 21
-        if ($cl[-1] -gt $ema -and $ema -ge $emaPrev) { return "alcista" }
-        if ($cl[-1] -lt $ema -and $ema -le $emaPrev) { return "bajista" }
-        return "lateral"
-    } catch { return "?" }
+        $v = if ($cl[-1] -gt $ema -and $ema -ge $emaPrev) { "alcista" } elseif ($cl[-1] -lt $ema -and $ema -le $emaPrev) { "bajista" } else { "lateral" }
+    } catch {}
+    $trendCache[$key] = @{ v = $v; at = Get-Date }
+    return $v
+}
+function Get-DailyRangePct($symbol) {
+    if ($drCache[$symbol]) { return $drCache[$symbol] }
+    try {
+        $k = (Invoke-RestMethod "$base/kline?symbol=$symbol&interval=1d&limit=20").data | Sort-Object { [long]$_.time }
+        $d = @($k[0..($k.Count - 2)]) | Select-Object -Last 14
+        $r = ($d | ForEach-Object { ([double]$_.high - [double]$_.low) / [double]$_.close * 100 } | Measure-Object -Average).Average
+        $drCache[$symbol] = $r; return $r
+    } catch { return $null }
+}
+function Get-Funding($symbol) {                    # % por periodo de 8h (positivo = los largos pagan)
+    if (-not $script:fundCache -or ((Get-Date) - $script:fundAt).TotalMinutes -gt 15) {
+        try { $script:fundCache = @{}; foreach ($f in (Invoke-RestMethod "$base/funding_rate/batch").data) { $script:fundCache[$f.symbol] = [double]$f.fundingRate }; $script:fundAt = Get-Date } catch {}
+    }
+    return $script:fundCache[$symbol]
+}
+function Get-BookBias($symbol) {                   # % de liquidez compradora en los 50 primeros niveles del libro
+    try {
+        $d = (Invoke-RestMethod "$base/depth?symbol=$symbol&limit=50").data
+        $b = ($d.bids | ForEach-Object { [double]$_[0] * [double]$_[1] } | Measure-Object -Sum).Sum
+        $a = ($d.asks | ForEach-Object { [double]$_[0] * [double]$_[1] } | Measure-Object -Sum).Sum
+        if (($a + $b) -gt 0) { return 100 * $b / ($a + $b) }
+    } catch {}
+    return $null
 }
 
-function Send-Alert($key, $msg) {
-    if ($seen[$key]) { return }
+function Get-LeveragePlan($vol24h, $dailyRange, $slPct) {
+    $lSl = [Math]::Floor(($MaxLossPct / 100) / ($slPct / 100))
+    $lLiq = if ($vol24h -ge 500e6) { 25 } elseif ($vol24h -ge 100e6) { 20 } elseif ($vol24h -ge 20e6) { 12 } elseif ($vol24h -ge 5e6) { 8 } elseif ($vol24h -ge 1e6) { 5 } else { 3 }
+    $lVol = if ($dailyRange -and $dailyRange -gt 0) { [Math]::Floor(30 / $dailyRange) } else { 5 }
+    $lev = [Math]::Max(1, [Math]::Min(50, [Math]::Min($lSl, [Math]::Min($lLiq, $lVol))))
+    $why = if ($lev -eq $lSl) { "tope por tu regla del SL" } elseif ($lev -eq $lLiq) { "tope por liquidez" } else { "tope por volatilidad diaria" }
+    $score = 0
+    if ($vol24h -lt 1e6) { $score += 3 } elseif ($vol24h -lt 5e6) { $score += 2 } elseif ($vol24h -lt 20e6) { $score += 1 }
+    if ($dailyRange -ge 12) { $score += 3 } elseif ($dailyRange -ge 7) { $score += 2 } elseif ($dailyRange -ge 4) { $score += 1 }
+    $risk = if ($score -ge 5) { "MUY ALTO" } elseif ($score -ge 3) { "ALTO" } elseif ($score -ge 1) { "MEDIO" } else { "BAJO" }
+    return @{ Lev = [int]$lev; LSl = [int]$lSl; Why = $why; Risk = $risk }
+}
+
+function Send-Alert($key, $msg, $photo = $null) {
+    if ($seen[$key]) { return $false }
     $seen[$key] = $true
-    if ($StateFile) { ($seen.Keys | Select-Object -Last 600) | ConvertTo-Json | Set-Content $StateFile -Encoding utf8 }
+    if ($StateFile) { ($seen.Keys | Select-Object -Last 800) | ConvertTo-Json | Set-Content $StateFile -Encoding utf8 }
     $line = "{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $msg
     Write-Host $line -ForegroundColor Yellow
     Add-Content -Path $log -Value $line
     try { [console]::Beep(1000, 300) } catch {}
     if ($TelegramToken -and $TelegramChatId) {
-        try {
-            $json = @{ chat_id = $TelegramChatId; text = $msg } | ConvertTo-Json -Compress
-            Invoke-RestMethod "https://api.telegram.org/bot$TelegramToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($json)) | Out-Null
-        } catch {}
+        foreach ($cid in ($TelegramChatId -split ',')) {          # varios destinos: chat privado, grupo o canal
+            $cid = $cid.Trim(); if (-not $cid) { continue }
+            $sent = $false
+            if ($photo -and $hasChart -and $msg.Length -le 1000) { $sent = Send-TelegramPhoto $TelegramToken $cid $photo $msg }
+            if (-not $sent) {
+                try {
+                    $json = @{ chat_id = $cid; text = $msg } | ConvertTo-Json -Compress
+                    Invoke-RestMethod "https://api.telegram.org/bot$TelegramToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($json)) | Out-Null
+                } catch {}
+            }
+        }
     }
+    return $true
 }
 
+function Fmt($x) { if ($x -ge 100) { return ("{0:N2}" -f $x) } elseif ($x -ge 1) { return ("{0:N4}" -f $x) } else { return ("{0:G5}" -f $x) } }
+
 function Scan($iv) {
-    $dur = switch ($iv) { '5m' {5} '15m' {15} '30m' {30} '1h' {60} '4h' {240} default {60} }
-    $tk = (Invoke-RestMethod "$base/tickers").data |
-        Where-Object { $_.symbol -like "*USDT" } |
+    $dur = $script:DurMin[$iv]; if (-not $dur) { $dur = 60 }
+    $rej = @{ sl = 0; roi = 0; fee = 0; trend = 0; tarde = 0 }
+    $tk = (Invoke-RestMethod "$base/tickers").data | Where-Object { $_.symbol -like "*USDT" } |
         Sort-Object { [double]$_.quoteVol } -Descending | Select-Object -First $TopN
     foreach ($t in $tk) {
+        if (($script:cmdTick++ % 10) -eq 0) { Poll-Commands }                 # atiende los comandos de Telegram mientras escanea
         try {
             $k = (Invoke-RestMethod "$base/kline?symbol=$($t.symbol)&interval=$iv&limit=120").data | Sort-Object { [long]$_.time }
             if ($k.Count -lt 60) { continue }
-            $closed = @($k[0..($k.Count - 2)])                 # la última vela viene en curso
-            $n = $closed.Count
-            $last = $closed[-1]
-            # Bitunix etiqueta cada vela con un intervalo de adelanto: cierra en (etiqueta + 2 x duración)
-            $ageMin = ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - ([long]$last.time + 2 * $dur * 60000)) / 60000
+            $closed = @($k[0..($k.Count - 2)])                       # la última vela viene en curso
+            $n = $closed.Count; $last = $closed[-1]
+            $ageMin = ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - ([long]$last.time + 2 * $dur * 60000)) / 60000   # Bitunix etiqueta con 1 intervalo de adelanto
             if ($ageMin -gt $MaxAgeFactor * $dur) { continue }
+            $key = "$($t.symbol)-$iv-$($last.time)"
+            if ($seen[$key]) { continue }
 
             $px = [double]$last.close; $op = [double]$last.open; $hi = [double]$last.high; $lo = [double]$last.low
             $rng = $hi - $lo; if ($rng -le 0) { continue }
@@ -107,53 +167,165 @@ function Scan($iv) {
             if ($avgVol -le 0) { continue }
             $ratio = [double]$last.quoteVol / $avgVol
             if ($ratio -lt $VolMult) { continue }
-
-            $atr = Get-Atr $closed ($n - 15) ($n - 2)          # ATR previo a la vela de ruptura
-            if ($atr -le 0) { continue }
-            $atr5 = Get-Atr $closed ($n - 6) ($n - 2)
-            $squeeze = $atr5 -le 0.85 * $atr
+            $atr = Get-Atr $closed ($n - 15) ($n - 2); if ($atr -le 0) { continue }
+            $squeeze = (Get-Atr $closed ($n - 6) ($n - 2)) -le 0.85 * $atr
             $rsi = Get-Rsi @($closed | ForEach-Object { [double]$_.close })
-            $posInCandle = ($px - $lo) / $rng                  # 1 = cierra en máximos, 0 = en mínimos
+            $pos = ($px - $lo) / $rng
 
-            $side = $null
-            if ($px -gt $pHigh -and $px -gt $op -and $posInCandle -ge 0.65 -and $rsi -lt 72 -and $rsi -gt 40) { $side = "LONG" }
-            elseif ($px -lt $pLow -and $px -lt $op -and $posInCandle -le 0.35 -and $rsi -gt 28 -and $rsi -lt 60) { $side = "SHORT" }
+            $side = $null; $strat = ""; $level = 0.0; $sl = 0.0; $why = ""; $pool = ""
+            # --- Barrido de liquidez: mecha fuera del rango, cierre dentro, con volumen (spring / upthrust) ---
+            if ("barrido" -in $Strategies) {
+                if ($hi -gt $pHigh -and $px -lt $pHigh -and ($hi - [Math]::Max($op, $px)) / $rng -ge 0.5) {
+                    $side = "SHORT"; $strat = "barrido"; $level = $pHigh; $sl = $hi + 0.2 * $atr
+                    $eq = @($prior | Where-Object { [double]$_.high -ge $pHigh - 0.25 * $atr }).Count
+                    $pool = if ($eq -ge 2) { "máximos iguales ($eq)" } else { "máximo del rango" }
+                    $why = "barre la liquidez sobre {0} velas y vuelve a entrar al rango con volumen x{1:N1}" -f $Lookback, $ratio
+                } elseif ($lo -lt $pLow -and $px -gt $pLow -and ([Math]::Min($op, $px) - $lo) / $rng -ge 0.5) {
+                    $side = "LONG"; $strat = "barrido"; $level = $pLow; $sl = $lo - 0.2 * $atr
+                    $eq = @($prior | Where-Object { [double]$_.low -le $pLow + 0.25 * $atr }).Count
+                    $pool = if ($eq -ge 2) { "mínimos iguales ($eq)" } else { "mínimo del rango" }
+                    $why = "barre la liquidez bajo {0} velas y vuelve a entrar al rango con volumen x{1:N1}" -f $Lookback, $ratio
+                }
+                if ($side) { $rk = [Math]::Abs($px - $sl); if ($rk -lt 0.5 * $atr -or $rk -gt 2.5 * $atr) { $side = $null } }
+            }
+            # --- Ruptura: cierra fuera del rango con volumen y sin haberse alejado ya; se entra en el RETESTEO del nivel roto ---
+            if (-not $side -and "ruptura" -in $Strategies) {
+                if ($px -gt $pHigh -and $px -gt $op -and $pos -ge 0.65 -and $rsi -lt 72 -and $rsi -gt 40) { $side = "LONG"; $level = $pHigh }
+                elseif ($px -lt $pLow -and $px -lt $op -and $pos -le 0.35 -and $rsi -gt 28 -and $rsi -lt 60) { $side = "SHORT"; $level = $pLow }
+                if ($side) {
+                    $sg = if ($side -eq "LONG") { 1 } else { -1 }
+                    $ext = $sg * ($px - $level) / $atr
+                    if ($ext -gt $MaxExt -or $rng -gt 2.5 * $atr) { $side = $null; $rej.tarde++ }
+                    else {
+                        $strat = "ruptura"; $sl = $level - $sg * 0.5 * $atr
+                        $rk = $sg * ($px - $sl); if ($rk -lt 0.8 * $atr) { $sl = $px - $sg * 0.8 * $atr }; if ($rk -gt 2.0 * $atr) { $sl = $px - $sg * 2.0 * $atr }
+                        $why = "rompe el {0} de {1} velas con volumen x{2:N1} y se entra en el retesteo del nivel" -f $(if ($side -eq "LONG") { "máximo" } else { "mínimo" }), $Lookback, $ratio
+                        $pool = if ($squeeze) { "tras compresión" } else { "" }
+                    }
+                }
+            }
             if (-not $side) { continue }
 
             $sgn = if ($side -eq "LONG") { 1 } else { -1 }
-            $level = if ($side -eq "LONG") { $pHigh } else { $pLow }   # nivel roto
-            $ext = $sgn * ($px - $level) / $atr                        # cuánto se ha alejado ya del nivel
-            if ($ext -gt $MaxExt -or $rng -gt 2.5 * $atr) { continue }  # ya es tarde / vela agotadora
+            # --- Entrada: orden limit en el nivel roto (retesteo) ---
+            $dist = if ($strat -eq "barrido") { [Math]::Min(0.5 * $atr, 0.5 * [Math]::Abs($px - $level)) } else { [Math]::Min(1.0 * $atr, [Math]::Abs($px - $level)) }
+            $entryType = "mercado"; $entry = $px
+            if ($dist -gt 0.05 * $atr) { $entryType = "limit"; $entry = $px - $sgn * $dist }
+            $risk = $sgn * ($entry - $sl); if ($risk -le 0) { continue }
+            $slPct = $risk / $entry * 100
+            if ($slPct -gt 12) { continue }
+            if ($slPct -lt $MinSlPct) { $rej.sl++; continue }               # comisiones demasiado grandes frente al recorrido
+            $tp1 = $entry + $sgn * 1.0 * $risk; $tp2 = $entry + $sgn * 2.0 * $risk; $tp3 = $entry + $sgn * 3.0 * $risk
+            $tpPct = [Math]::Abs($tp3 - $entry) / $entry * 100
 
-            # Stop: vuelve dentro del rango = ruptura fallida
-            $sl = $level - $sgn * 0.5 * $atr
-            $risk = $sgn * ($px - $sl)
-            if ($risk -lt 0.8 * $atr) { $sl = $px - $sgn * 0.8 * $atr }
-            if ($risk -gt 2.0 * $atr) { $sl = $px - $sgn * 2.0 * $atr }
-            $R = $sgn * ($px - $sl)
-            $tp1 = $px + $sgn * 1.5 * $R
-            $tp2 = $px + $sgn * 3.0 * $R
-            $slPct = $R / $px * 100
-            $zA = $px - $sgn * [Math]::Min(0.5 * $atr, [Math]::Abs($px - $level))   # retroceso hasta el nivel roto
-            $zLow = [Math]::Min($px, $zA); $zHigh = [Math]::Max($px, $zA)
+            # --- Contexto de ballenas / mercado ---
+            $trend = Get-TrendHtf $t.symbol $iv
+            $aligned = ($side -eq "LONG" -and $trend -eq "alcista") -or ($side -eq "SHORT" -and $trend -eq "bajista")
+            $counter = ($side -eq "LONG" -and $trend -eq "bajista") -or ($side -eq "SHORT" -and $trend -eq "alcista")
+            # filtro validado en backtest: LONG sin tendencia en contra, SHORT solo a favor de la tendencia superior
+            if (($side -eq "LONG" -and $counter) -or ($side -eq "SHORT" -and -not $aligned)) { $rej.trend++; continue }
+            $htfName = if ($iv -eq "4h") { "diaria" } else { "4h" }
+            $btcT = if ($t.symbol -eq "BTCUSDT") { $trend } else { Get-TrendHtf "BTCUSDT" $iv }
+            $btcAl = if ($btcT -eq "alcista" -and $side -eq "LONG" -or $btcT -eq "bajista" -and $side -eq "SHORT") { $true } elseif ($btcT -eq "alcista" -and $side -eq "SHORT" -or $btcT -eq "bajista" -and $side -eq "LONG") { $false } else { $null }
 
-            $trend = Get-Trend4h $t.symbol
-            $ok = ($side -eq "LONG" -and $trend -eq "alcista") -or ($side -eq "SHORT" -and $trend -eq "bajista")
-            $trendTxt = if ($ok) { "Tendencia 4h: $trend (a favor) ✅" } elseif ($trend -eq "lateral" -or $trend -eq "?") { "Tendencia 4h: $trend" } else { "Tendencia 4h: $trend (en contra, más riesgo) ⚠️" }
+            # --- Apalancamiento, potencial y comisiones ---
+            $dr = Get-DailyRangePct $t.symbol
+            $plan = Get-LeveragePlan ([double]$t.quoteVol) $dr $slPct
+            $lev = $plan.Lev
+            $roi1 = $lev * $slPct; $roi2 = 2 * $roi1; $roi3 = 3 * $roi1; $roiSl = $roi1
+            if ($roi2 -lt $MinRoiTp2) { $rej.roi++; continue }              # sin recorrido suficiente para el apalancamiento seguro
+            $feeShare = $FeeRT / $slPct * 100                               # comisiones / ganancia en TP1
+            if ($feeShare -gt $MaxFeeShare) { $rej.fee++; continue }
+
+            $fund = Get-Funding $t.symbol
+            $book = Get-BookBias $t.symbol
+            $ctx = @()
+            $ctx += if ($aligned) { "Tendencia $htfName $trend (a favor) ✅" } else { "Tendencia $htfName $trend" }
+            if ($t.symbol -ne "BTCUSDT") { $ctx += if ($btcAl -eq $true) { "BTC a favor ✅" } elseif ($btcAl -eq $false) { "BTC en contra ⚠️" } else { "BTC lateral" } }
+            if ($null -ne $fund) {
+                $fx = if ($fund -ge 0.03 -and $side -eq "SHORT") { " (largos saturados: favorece el SHORT ✅)" } elseif ($fund -le -0.03 -and $side -eq "LONG") { " (cortos saturados: favorece el LONG ✅)" } elseif ($fund -ge 0.03 -and $side -eq "LONG") { " (largos saturados ⚠️)" } elseif ($fund -le -0.03 -and $side -eq "SHORT") { " (cortos saturados ⚠️)" } else { "" }
+                $ctx += ("Funding {0:N3}%{1}" -f $fund, $fx)
+            }
+            if ($null -ne $book) { $ctx += ("Libro: {0:N0}% compradores / {1:N0}% vendedores" -f $book, (100 - $book)) }
+
+            $q = 0.6
+            if ($aligned) { $q += 0.2 }
+            if ($squeeze -or $pool -like "*iguales*") { $q += 0.1 }
+            if ($ratio -ge 4) { $q += 0.1 }
+            if ($btcAl -eq $true) { $q += 0.05 } elseif ($btcAl -eq $false) { $q -= 0.1 }
+            $q = [Math]::Max(0.3, [Math]::Min(1.0, $q))
+            $cf = switch ($plan.Risk) { "BAJO" { 1.0 } "MEDIO" { 0.8 } "ALTO" { 0.55 } default { 0.35 } }
+            $margin = [Math]::Max(20, [Math]::Min($MaxMargin, [Math]::Round($MaxMargin * $q * $cf / 10) * 10))
+            $notional = $margin * $lev
+            $lossUsd = $notional * $slPct / 100
+            $u1 = $lossUsd; $u2 = 2 * $lossUsd; $u3 = 3 * $lossUsd
+            $planGain = $lossUsd * ($W1 * 1 + $W2 * 2 + $W3 * 3)            # si llega a los tres objetivos
+            $feeUsd = $notional * $FeeRT / 100
+            $volTxt = if ([double]$t.quoteVol -ge 1e6) { "{0:N1}M" -f ([double]$t.quoteVol / 1e6) } else { "{0:N0}k" -f ([double]$t.quoteVol / 1e3) }
             $name = $t.symbol -replace 'USDT$', ''
-            $icon = if ($side -eq "LONG") { "🟢" } else { "🔴" }
-            $what = if ($side -eq "LONG") { "máximo" } else { "mínimo" }
-            $sq = if ($squeeze) { " tras compresión" } else { "" }
-            $msg = "{0} {1} {2} ({3}) - ruptura temprana`nRompe el {4} de {5} velas con volumen x{6:N1}{7}`nEntrada aprox: {8:G6} - {9:G6}`nStop (SL): {10:G6} (-{11:N1}%)`nObjetivo 1 (TP1): {12:G6}`nObjetivo 2 (TP2): {13:G6}`n{14}" -f $icon, $side, $name, $iv, $what, $Lookback, $ratio, $sq, $zLow, $zHigh, $sl, $slPct, $tp1, $tp2, $trendTxt
-            Send-Alert "$($t.symbol)-$iv-$($last.time)" $msg
+            $icon = if ($side -eq "LONG") { "🟢" } else { "🔴" }; $arrow = if ($side -eq "LONG") { "📈" } else { "📉" }
+            $stratName = if ($strat -eq "barrido") { "Barrido de liquidez" } else { "Ruptura con retesteo" }
+            $poolTxt = if ($pool) { " · $pool" } else { "" }
+            $valid = [int](4 * $dur / 60)
+            $msg = ("{0} {1}/USDT {2} {3}  ({4} · {5}){6}`n" +
+                "Apalancamiento: x{7} ({8}; por tu SL llegaría a x{9})`n" +
+                "{10}`n`n" +
+                "Entrada: {11}{12}`n`n" +
+                "TP:`n1) {13} (1:1)  +{14:N0}% s/margen`n2) {15} (1:2)  +{16:N0}% s/margen`n`nTP final: {17} (1:3)  +{18:N0}% s/margen (movimiento +{19:N1}%)`n`n" +
+                "🛑 SL: {20} (-{21:N1}%)  -{22:N0}% s/margen`n`n" +
+                "💰 Margen sugerido: {23:N0} USDT (máx. {24:N0}) -> posición {25:N0} USDT`n" +
+                "Si salta el SL: -{26:N0} USDT`n" +
+                "Si llega a TP1 / TP2 / TP3: +{27:N0} / +{28:N0} / +{29:N0} USDT`n" +
+                "Gestión: cierra {30:N0}% en TP1, {31:N0}% en TP2 y {32:N0}% en TP3, y mueve el SL a la entrada tras el TP1 (ganancia total ~+{33:N0} USDT).`n" +
+                "Comisiones estimadas: {34:N1} USDT ({35:N0}% de la ganancia en TP1)`n`n" +
+                "Riesgo de la moneda: {36} (vol. 24h {37} USDT, rango diario medio {38:N1}%)`n" +
+                "Motivo: {39}`n{40}") -f
+                $icon, $name, $side, $arrow, $iv, $stratName, $poolTxt, $lev, $plan.Why, $plan.LSl,
+                $(if ($entryType -eq "limit") { "Operación con orden limit (válida unas $valid h; si no se ejecuta, se cancela)" } else { "Entrada a mercado" }),
+                (Fmt $entry), $(if ($entryType -eq "limit") { " (orden limit)" } else { "" }),
+                (Fmt $tp1), $roi1, (Fmt $tp2), $roi2, (Fmt $tp3), $roi3, $tpPct, (Fmt $sl), $slPct, $roiSl, $margin, $MaxMargin, $notional,
+                $lossUsd, $u1, $u2, $u3, ($W1 * 100), ($W2 * 100), ($W3 * 100), $planGain, $feeUsd, $feeShare, $plan.Risk, $volTxt, $dr, $why, ($ctx -join "`n")
+
+            # --- Gráfico estilo TradingView ---
+            $photo = $null
+            if ($hasChart) {
+                $cs = @($closed | Select-Object -Last 70 | ForEach-Object { [pscustomobject]@{ o = [double]$_.open; h = [double]$_.high; l = [double]$_.low; c = [double]$_.close } })
+                $photo = New-SignalChart $cs $side $entry $sl $tp1 $tp2 $tp3 ("{0}/USDT {1} · {2} · {3}" -f $name, $iv, $side, $stratName) (Join-Path ([IO.Path]::GetTempPath()) ("senal-" + $t.symbol + ".png")) $level
+            }
+            if (Send-Alert $key $msg $photo) {
+                Add-SignalRecord ([ordered]@{
+                    id = $key; time = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); sym = $t.symbol; tf = $iv; strat = $strat; side = $sgn
+                    entryType = $entryType; entry = $entry; sl = $sl; tp1 = $tp1; tp2 = $tp2; tp3 = $tp3; riskAbs = $risk; slPct = $slPct
+                    lev = $lev; margin = $margin; ratio = [Math]::Round($ratio, 2); trend = $trend; aligned = $aligned; btcAligned = $btcAl
+                    squeeze = $squeeze; pool = $pool; funding = $fund; book = $book; risk = $plan.Risk; roiTp2 = [Math]::Round($roi2, 1)
+                    status = $(if ($entryType -eq "limit") { "pending" } else { "open" }); stage = 0; realized = 0.0; age = 0; lastLabel = [long]$last.time; outcome = $null; R = $null; net = $null
+                })
+            }
         } catch { }
         Start-Sleep -Milliseconds 100
     }
+    Write-Host ("  [{0}] descartadas: SL<{1}% -> {2} | potencial<{3}% -> {4} | comisiones -> {5} | tendencia -> {6} | ya tarde -> {7}" -f $iv, $MinSlPct, $rej.sl, $MinRoiTp2, $rej.roi, $rej.fee, $rej.trend, $rej.tarde) -ForegroundColor DarkGray
 }
 
-Write-Host "Buscando rupturas tempranas en top $TopN pares Bitunix ($($Interval -join ', ')) cada $EverySeconds s. Ctrl+C para parar." -ForegroundColor Cyan
+function Send-DailyReport {
+    $f = Join-Path $PSScriptRoot "last-report.txt"
+    if (Test-Path $f) { try { $prev = [datetime]::Parse((Get-Content $f -Raw).Trim(), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind); if (([datetime]::UtcNow - $prev.ToUniversalTime()).TotalHours -lt 24) { return } } catch {} }
+    $rep = Get-Report
+    Set-Content $f ([datetime]::UtcNow.ToString("o"))
+    Write-Host $rep -ForegroundColor Cyan
+    if ($TelegramToken -and $TelegramChatId -and (@(Read-Signals).Count -gt 0)) {
+        foreach ($cid in ($TelegramChatId -split ',')) {
+            try { $json = @{ chat_id = $cid.Trim(); text = $rep } | ConvertTo-Json -Compress; Invoke-RestMethod "https://api.telegram.org/bot$TelegramToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($json)) | Out-Null } catch {}
+        }
+    }
+}
+
+Write-Host "Buscando setups de alto potencial en top $TopN pares Bitunix ($($Interval -join ', ')) [$($Strategies -join ', ')] cada $EverySeconds s. Ctrl+C para parar." -ForegroundColor Cyan
+$script:startAt = Get-Date
 do {
+    try { Update-Signals $base } catch {}
     foreach ($iv in $Interval) { Scan $iv }
+    try { Send-DailyReport } catch {}
     Write-Host ("{0} pasada completada" -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor DarkGray
-    if (-not $Once) { Start-Sleep -Seconds $EverySeconds }
-} while (-not $Once)
+    if (-not $Once) { $until = (Get-Date).AddSeconds($EverySeconds); while ((Get-Date) -lt $until) { Poll-Commands; Start-Sleep -Seconds 6 } } else { Poll-Commands }
+} while (-not $Once -and ($MaxMinutes -le 0 -or ((Get-Date) - $script:startAt).TotalMinutes -lt $MaxMinutes))
