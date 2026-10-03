@@ -40,6 +40,7 @@ $sigChats = @($(if ($TelegramSignalChatId) { $TelegramSignalChatId } else { $Tel
 $allowedChats = @(($TelegramChatId + "," + $TelegramSignalChatId) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)   # chats que pueden dar órdenes al bot
 $offsetFile = Join-Path $PSScriptRoot "bot-offset.txt"
 $script:cmdTick = 0
+$script:PrivateChats = if ($TelegramSignalChatId) { $sigChats } else { @() }     # /resultados solo en el chat privado de señales
 function Poll-Commands { if ($hasCmds -and $TelegramToken -and $allowedChats.Count) { try { Handle-Commands $TelegramToken $allowedChats $offsetFile } catch {} } }
 $hasChart = $false
 if (-not $NoChart -and (Test-Path (Join-Path $PSScriptRoot "chart.ps1")) -and $PSVersionTable.PSEdition -ne 'Core') { . (Join-Path $PSScriptRoot "chart.ps1"); $hasChart = $true }

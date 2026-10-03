@@ -166,7 +166,6 @@ $script:HelpText = @"
 /precio SIMBOLO · precio rápido
 /riesgo PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · analiza el riesgo/beneficio de tu operación (R:B, acierto mínimo, comisiones, liquidación, estado actual)
    Ejemplo: /riesgo ETH LARGO 2664.24 2638 2723 135 20
-/resultados · aciertos reales de las señales del bot
 /ayuda · esta ayuda
 /id · muestra el identificador del chat
 
@@ -254,8 +253,14 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
         $key = "$chat"; if ($script:LastCmd[$key] -and ((Get-Date) - $script:LastCmd[$key]).TotalSeconds -lt 12) { Send-Tg $token $chat "Un momento, voy con una petición cada pocos segundos. Repite en unos segundos." $m.message_id; continue }
         $script:LastCmd[$key] = Get-Date
         switch ($cmd) {
-            { $_ -in "/ayuda", "/start", "/help" } { Send-Tg $token $chat $script:HelpText $m.message_id }
-            "/resultados" { $rep = try { Get-Report } catch { "Aún no hay resultados registrados." }; Send-Tg $token $chat $rep $m.message_id }
+            { $_ -in "/ayuda", "/start", "/help" } {
+                $h = $script:HelpText; if (-not $script:PrivateChats -or $chat -in $script:PrivateChats) { $h = $h.Replace("/ayuda · esta ayuda", "/resultados · aciertos reales de las señales del bot (solo en este chat privado)`n/ayuda · esta ayuda") }
+                Send-Tg $token $chat $h $m.message_id
+            }
+            "/resultados" {
+                if ($script:PrivateChats -and $chat -notin $script:PrivateChats) { Send-Tg $token $chat "Este comando solo está disponible en el chat privado de Luis. Aquí puedes usar /informe, /precio y /riesgo." $m.message_id; break }
+                $rep = try { Get-Report } catch { "Aún no hay resultados registrados." }; Send-Tg $token $chat $rep $m.message_id
+            }
             "/precio" {
                 if (-not $args1) { Send-Tg $token $chat "Uso: /precio SIMBOLO (ej. /precio BTC o /precio AAPL)" $m.message_id; break }
                 $q = ($args1[0] -replace '[^A-Za-z0-9.\-\^=]', '').ToUpper(); $out = $null
