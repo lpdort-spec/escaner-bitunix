@@ -32,15 +32,19 @@ $cfg = Join-Path $PSScriptRoot "telegram.json"
 if (-not $TelegramToken -and (Test-Path $cfg)) { $c = Get-Content $cfg -Raw | ConvertFrom-Json; $TelegramToken = $c.token; $TelegramChatId = $c.chatId }
 if ($StateFile -and (Test-Path $StateFile)) { foreach ($k in @(Get-Content $StateFile -Raw | ConvertFrom-Json)) { $seen[$k] = $true } }
 . (Join-Path $PSScriptRoot "tracker.ps1")
+if (Test-Path (Join-Path $PSScriptRoot "tracker-extra.ps1")) { . (Join-Path $PSScriptRoot "tracker-extra.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "informe-semanal.ps1")) { . (Join-Path $PSScriptRoot "informe-semanal.ps1") }
 $hasCmds = $false
 if (Test-Path (Join-Path $PSScriptRoot "commands.ps1")) { . (Join-Path $PSScriptRoot "commands.ps1"); $hasCmds = $true }
 $TelegramSignalChatId = $env:TELEGRAM_SIGNAL_CHAT_ID
 if (-not $TelegramSignalChatId -and (Test-Path $cfg)) { try { $TelegramSignalChatId = (Get-Content $cfg -Raw | ConvertFrom-Json).signalChatId } catch {} }
-$sigChats = @($(if ($TelegramSignalChatId) { $TelegramSignalChatId } else { $TelegramChatId }) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })       # destinos de las señales
+# destinos de las señales: el secreto del chat privado; si no está configurado, SOLO chats privados (id positivo), nunca grupos (id negativo)
+$sigChats = @($(if ($TelegramSignalChatId) { $TelegramSignalChatId } else { $TelegramChatId }) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+if (-not $TelegramSignalChatId) { $priv = @($sigChats | Where-Object { $_ -notmatch '^-' }); if ($priv.Count) { $sigChats = $priv } }
 $allowedChats = @(($TelegramChatId + "," + $TelegramSignalChatId) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)   # chats que pueden dar órdenes al bot
 $offsetFile = Join-Path $PSScriptRoot "bot-offset.txt"
 $script:cmdTick = 0
-$script:PrivateChats = if ($TelegramSignalChatId) { $sigChats } else { @() }     # /resultados solo en el chat privado de señales
+$script:PrivateChats = $sigChats     # comandos reservados (resultados, semanal, operación...) solo en el chat privado de señales
 function Poll-Commands { if ($hasCmds -and $TelegramToken -and $allowedChats.Count) { try { Handle-Commands $TelegramToken $allowedChats $offsetFile } catch {} } }
 $hasChart = $false
 if (-not $NoChart -and (Test-Path (Join-Path $PSScriptRoot "chart.ps1")) -and $PSVersionTable.PSEdition -ne 'Core') { . (Join-Path $PSScriptRoot "chart.ps1"); $hasChart = $true }
@@ -352,7 +356,7 @@ function Scan($iv) {
                     entryType = $entryType; entry = $entry; sl = $sl; tp1 = $tp1; tp2 = $tp2; tp3 = $tp3; riskAbs = $risk; slPct = $slPct
                     lev = $lev; margin = $margin; ratio = [Math]::Round($ratio, 2); trend = $trend; aligned = $aligned; btcAligned = $btcAl
                     squeeze = $squeeze; pool = $pool; funding = $fund; book = $book; risk = $plan.Risk; roiTp2 = [Math]::Round($roi2, 1)
-                    status = $(if ($entryType -eq "limit") { "pending" } else { "open" }); stage = 0; realized = 0.0; age = 0; lastLabel = [long]$last.time; outcome = $null; R = $null; net = $null
+                    status = $(if ($entryType -eq "limit") { "pending" } else { "open" }); stage = 0; realized = 0.0; age = 0; lastLabel = [long]$last.time; lab0 = [long]$last.time; sentiment = $script:sentCache.v; outcome = $null; R = $null; net = $null
                 })
             }
         } catch { }
@@ -361,25 +365,39 @@ function Scan($iv) {
     Write-Host ("  [{0}] descartadas: SL<{1}% -> {2} | potencial<{3}% -> {4} | comisiones -> {5} | tendencia -> {6} | ya tarde -> {7}" -f $iv, $MinSlPct, $rej.sl, $MinRoiTp2, $rej.roi, $rej.fee, $rej.trend, $rej.tarde) -ForegroundColor DarkGray
 }
 
+function Send-ToSignalChats($text) {
+    if (-not ($TelegramToken -and $sigChats.Count)) { return }
+    foreach ($cid in $sigChats) { try { Send-Tg $TelegramToken $cid $text $null } catch {} }
+}
+# Informe diario sencillo: todos los días a las 22:00 (hora de España) o en cuanto el bot esté activo después. Solo al chat privado de señales.
 function Send-DailyReport {
-    $f = Join-Path $PSScriptRoot "last-report.txt"
-    if (Test-Path $f) { try { $prev = [datetime]::Parse((Get-Content $f -Raw).Trim(), [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind); if (([datetime]::UtcNow - $prev.ToUniversalTime()).TotalHours -lt 24) { return } } catch {} }
-    $rep = Get-Report
-    Set-Content $f ([datetime]::UtcNow.ToString("o"))
+    $now = Get-MadridNow; $today = $now.ToString("yyyy-MM-dd")
+    if ($now.Hour -lt 22 -or (Get-ReportState "daily") -eq $today) { return }
+    Set-ReportState "daily" $today
+    $rep = Get-DailyReport
     Write-Host $rep -ForegroundColor Cyan
-    if ($TelegramToken -and $sigChats.Count -and (@(Read-Signals).Count -gt 0)) {
-        foreach ($cid in $sigChats) {
-            try { $json = @{ chat_id = $cid.Trim(); text = $rep } | ConvertTo-Json -Compress; Invoke-RestMethod "https://api.telegram.org/bot$TelegramToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($json)) | Out-Null } catch {}
-        }
-    }
+    Send-ToSignalChats $rep
+}
+# Informe semanal profundo: domingos a partir de las 22:00 (hora de España), una vez por semana.
+function Send-WeeklyReport {
+    $now = Get-MadridNow
+    if ($now.DayOfWeek -ne [DayOfWeek]::Sunday -or $now.Hour -lt 22) { return }
+    $week = $now.ToString("yyyy-MM-dd")
+    if ((Get-ReportState "weekly") -eq $week) { return }
+    Set-ReportState "weekly" $week
+    $rep = Get-WeeklyDeepReport
+    Write-Host $rep -ForegroundColor Cyan
+    Send-ToSignalChats $rep
 }
 
 Write-Host "Buscando setups de alto potencial en top $TopN pares Bitunix ($($Interval -join ', ')) [$($Strategies -join ', ')] cada $EverySeconds s. Ctrl+C para parar." -ForegroundColor Cyan
 $script:startAt = Get-Date
+try { Import-ManualTrades (Join-Path $PSScriptRoot "operaciones-manuales.json") } catch {}      # tus operaciones reales entran en el seguimiento (solo se importan una vez)
 do {
     try { Update-Signals $base } catch {}
     foreach ($iv in $Interval) { Scan $iv }
     try { Send-DailyReport } catch {}
+    try { Send-WeeklyReport } catch {}
     Write-Host ("{0} pasada completada" -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor DarkGray
     if (-not $Once) { $until = (Get-Date).AddSeconds($EverySeconds); while ((Get-Date) -lt $until) { Poll-Commands; Start-Sleep -Seconds 6 } } else { Poll-Commands }
 } while (-not $Once -and ($MaxMinutes -le 0 -or ((Get-Date) - $script:startAt).TotalMinutes -lt $MaxMinutes))

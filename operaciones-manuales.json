@@ -1,0 +1,14 @@
+[
+  {
+    "id": "manual-eth-20261003",
+    "sym": "ETH", "side": 1, "entry": 2664.24, "sl": 2638, "tp": 2723,
+    "margin": 134.49, "lev": 20, "qty": 0.998,
+    "note": "Operación real de Luis en Bitunix (captura 2026-10-03): ETHUSDT largo x20, aislado"
+  },
+  {
+    "id": "manual-cbrs-20261003",
+    "sym": "CBRS", "side": 1, "entry": 167.34, "sl": 170, "tp": 210,
+    "margin": 225.11, "lev": 5, "qty": 6.72,
+    "note": "Operación real de Luis en Bitunix (captura 2026-10-03): CBRSUSDT largo x5, aislado; SL movido a 170 (por encima de la entrada). R de referencia = 35% del margen porque se desconoce el SL inicial"
+  }
+]

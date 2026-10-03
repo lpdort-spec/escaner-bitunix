@@ -239,6 +239,35 @@ function Build-RiskReport($ra) {
     return ($L -join "`n")
 }
 
+# ---------- /operacion y /cerrar: registrar o cerrar una operación manual en el seguimiento (solo chat privado) ----------
+function Register-ManualFromArgs($ra) {
+    $uso = "Uso: /operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO`nEjemplo: /operacion ETH LARGO 2664.24 2638 2723 135 20`nSi ya hay una operación abierta de ese par, solo se actualizan SL y TP."
+    if (-not (Get-Command Register-ManualTrade -ErrorAction SilentlyContinue)) { return "El seguimiento de operaciones manuales no está disponible en este entorno." }
+    if ($ra.Count -lt 7) { return $uso }
+    $symR = (($ra[0] -replace '[^A-Za-z0-9]', '').ToUpper()) -replace 'USDT$', ''
+    $w = $ra[1].ToLower(); $sg = 0; if ($w -in 'largo', 'long') { $sg = 1 } elseif ($w -in 'corto', 'short') { $sg = -1 }
+    if ($sg -eq 0) { return "Indica LARGO o CORTO.`n$uso" }
+    $nums = @()
+    foreach ($i in 2..6) { $s1 = (($ra[$i] -replace ',', '.') -replace '[^0-9.]', ''); $dv = 0.0; if (-not [double]::TryParse($s1, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$dv) -or $dv -le 0) { return "No entiendo el valor '$($ra[$i])'.`n$uso" }; $nums += $dv }
+    $en = $nums[0]; $sl = $nums[1]; $tp = $nums[2]; $mg = $nums[3]; $lv = $nums[4]
+    if ($sg * ($tp - $en) -le 0) { return "El TP debe estar " + $(if ($sg -eq 1) { "por encima" } else { "por debajo" }) + " de la entrada." }
+    if ($sg * ($sl - $en) -ge $sg * ($tp - $en)) { return "El SL queda más allá del TP; revisa los datos." }
+    $ok = $false; try { $ok = [bool](Invoke-RestMethod "$($script:CmdBase)/tickers?symbols=${symR}USDT" -TimeoutSec 15).data } catch {}
+    if (-not $ok) { return "No encuentro ${symR}USDT en Bitunix, y el seguimiento usa sus velas. No registro la operación." }
+    $r = Register-ManualTrade $symR $sg $en $sl $tp $mg $lv
+    return ("✅ Operación {0}: {1} {2} x{3:N0} · entrada {4} · SL {5} · TP {6} · margen {7:N2} USDT.`nQueda en el seguimiento: se resolverá sola con las velas de 1h (SL o TP) y saldrá en el informe diario y semanal. Si la cierras a mano, avísame con /cerrar {1} PRECIO." -f $r.action, $symR, $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), $lv, (Fpx $en), (Fpx $sl), (Fpx $tp), $mg)
+}
+function Close-ManualFromArgs($ra) {
+    $uso = "Uso: /cerrar PAR PRECIO_DE_SALIDA`nEjemplo: /cerrar ETH 2690.5"
+    if (-not (Get-Command Close-ManualTrade -ErrorAction SilentlyContinue)) { return "El seguimiento de operaciones manuales no está disponible en este entorno." }
+    if ($ra.Count -lt 2) { return $uso }
+    $symR = (($ra[0] -replace '[^A-Za-z0-9]', '').ToUpper()) -replace 'USDT$', ''
+    $dv = 0.0; if (-not [double]::TryParse((($ra[1] -replace ',', '.') -replace '[^0-9.]', ''), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$dv) -or $dv -le 0) { return "No entiendo el precio '$($ra[1])'.`n$uso" }
+    $r = Close-ManualTrade $symR $dv
+    if (-not $r) { return "No hay ninguna operación manual abierta de ${symR}USDT en el seguimiento." }
+    return ("✅ Cerrada {0}: salida {1} · resultado {2:+0.00;-0.00} USDT ({3:+0.0;-0.0}% del margen, comisiones estimadas al 0,10%) · {4:+0.00;-0.00}R." -f $symR, (Fpx $dv), [double]$r.pnlUsd, ([double]$r.pnlUsd / [double]$r.margin * 100), [double]$r.net)
+}
+
 function Handle-Commands($token, $allowedChats, $offsetFile) {
     $off = 0; if (Test-Path $offsetFile) { try { $off = [long](Get-Content $offsetFile -Raw).Trim() } catch {} }
     try { $u = Invoke-RestMethod -Uri "https://api.telegram.org/bot$token/getUpdates?offset=$off&timeout=0&allowed_updates=%5B%22message%22%5D" -TimeoutSec 25 } catch { return }
@@ -254,12 +283,20 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
         $script:LastCmd[$key] = Get-Date
         switch ($cmd) {
             { $_ -in "/ayuda", "/start", "/help" } {
-                $h = $script:HelpText; if (-not $script:PrivateChats -or $chat -in $script:PrivateChats) { $h = $h.Replace("/ayuda · esta ayuda", "/resultados · aciertos reales de las señales del bot (solo en este chat privado)`n/ayuda · esta ayuda") }
+                $h = $script:HelpText; if (-not $script:PrivateChats -or $chat -in $script:PrivateChats) { $h = $h.Replace("/ayuda · esta ayuda", "/resultados · informe diario sencillo (señales + tus operaciones manuales); también llega solo cada día a las 22:00 (hora de España)`n/semanal · informe semanal profundo con análisis de los fallos; también llega solo los domingos a las 22:00`n/operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · registra una operación tuya en el seguimiento`n/cerrar PAR PRECIO · registra el cierre manual de una operación tuya`n(estos 4 comandos solo funcionan en este chat privado)`n/ayuda · esta ayuda") }
                 Send-Tg $token $chat $h $m.message_id
             }
-            "/resultados" {
+            { $_ -in "/resultados", "/semanal", "/operacion", "/cerrar" } {
                 if ($script:PrivateChats -and $chat -notin $script:PrivateChats) { Send-Tg $token $chat "Este comando solo está disponible en el chat privado de Luis. Aquí puedes usar /informe, /precio y /riesgo." $m.message_id; break }
-                $rep = try { Get-Report } catch { "Aún no hay resultados registrados." }; Send-Tg $token $chat $rep $m.message_id
+                switch ($cmd) {
+                    "/resultados" { $rep = try { if (Get-Command Get-DailyReport -ErrorAction SilentlyContinue) { Get-DailyReport } else { Get-Report } } catch { "Aún no hay resultados registrados." }; Send-Tg $token $chat $rep $m.message_id }
+                    "/semanal" {
+                        Send-Tg $token $chat "⏳ Preparando el informe semanal profundo (puede tardar un minuto)..." $m.message_id
+                        $rep = try { Get-WeeklyDeepReport } catch { "No he podido generar el informe semanal ahora: $($_.Exception.Message)" }; Send-Tg $token $chat $rep $null
+                    }
+                    "/operacion" { Send-Tg $token $chat (Register-ManualFromArgs $args1) $m.message_id }
+                    "/cerrar" { Send-Tg $token $chat (Close-ManualFromArgs $args1) $m.message_id }
+                }
             }
             "/precio" {
                 if (-not $args1) { Send-Tg $token $chat "Uso: /precio SIMBOLO (ej. /precio BTC o /precio AAPL)" $m.message_id; break }

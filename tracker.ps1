@@ -6,9 +6,17 @@ $script:CostRT = 0.0010      # 0,10% ida y vuelta sobre el nominal (entrada y ob
 $script:W1 = 1.0/3; $script:W2 = 1.0/3; $script:W3 = 1.0/3   # reparto de salidas: un tercio en TP1 (1R), TP2 (2R) y TP3 (3R)
 $script:DurMin = @{ '5m' = 5; '15m' = 15; '30m' = 30; '1h' = 60; '4h' = 240 }
 
+$script:TrkBase = "https://fapi.bitunix.com/api/v1/futures/market"
 function Read-Signals {
     if (-not (Test-Path $script:SigFile)) { return @() }
-    return @(Get-Content $script:SigFile -Encoding UTF8 | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+    $recs = @(Get-Content $script:SigFile -Encoding UTF8 | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
+    # PowerShell no permite asignar propiedades inexistentes en objetos de JSON: se añaden todas las que el seguimiento puede escribir
+    foreach ($r0 in $recs) {
+        foreach ($p in 'note', 'closedAt', 'exit', 'pnlUsd', 'lab0', 'manual', 'mode', 'sentiment', 'qty', 'sl0', 'closeNote') {
+            if (-not ($r0.PSObject.Properties.Name -contains $p)) { $r0 | Add-Member -NotePropertyName $p -NotePropertyValue $null }
+        }
+    }
+    return $recs
 }
 function Save-Signals($sigs) {
     ($sigs | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 5 }) | Set-Content $script:SigFile -Encoding UTF8
@@ -34,6 +42,12 @@ function Update-Signals($base) {
             $hitSL = if ($sgn -eq 1) { $lo -le $s.sl } else { $hi -ge $s.sl }
             $reachEntry = if ($sgn -eq 1) { $lo -le $s.entry } else { $hi -ge $s.entry }
             $reachTP = { param($lvl) if ($sgn -eq 1) { $hi -ge $lvl } else { $lo -le $lvl } }
+            if ($s.manual -eq $true) {      # operación manual del usuario: salida única (SL o TP), sin gestión simulada ni tiempo máximo
+                $s.age = [int]$s.age + 1
+                if ($hitSL) { $s.status = 'closed'; $s.exit = [double]$s.sl; $s.outcome = $(if ($sgn * ([double]$s.sl - [double]$s.entry) -gt 0) { 'SL en beneficio' } else { 'SL' }); break }
+                if (& $reachTP $s.tp1) { $s.status = 'closed'; $s.exit = [double]$s.tp1; $s.outcome = 'TP'; break }
+                continue
+            }
             if ($s.status -eq 'pending') {
                 $s.age = [int]$s.age + 1
                 if ($hitSL) { $s.status = 'unfilled'; $s.note = 'invalidada antes de entrar'; break }
@@ -58,6 +72,11 @@ function Update-Signals($base) {
                 $s.R = [double]$s.realized + $left * [Math]::Max(-1.0, [Math]::Min(3.0, $m)); $s.status = 'closed'; $s.outcome = 'tiempo'; break
             }
         }
+        if ($s.manual -eq $true -and $s.status -eq 'closed' -and $null -eq $s.net -and $null -ne $s.exit) {
+            $s.R = $sgn * ([double]$s.exit - [double]$s.entry) / [double]$s.riskAbs
+            $q = if ($s.qty) { [double]$s.qty } else { [double]$s.margin * [double]$s.lev / [double]$s.entry }
+            $s.pnlUsd = [Math]::Round($sgn * ([double]$s.exit - [double]$s.entry) * $q - $q * [double]$s.entry * $script:CostRT, 2)
+        }
         if ($s.status -eq 'closed' -and $null -eq $s.net) { $s.net = [double]$s.R - $script:CostRT / ([double]$s.slPct / 100); $s.closedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
     }
     if ($changed) { Save-Signals $sigs }
@@ -72,7 +91,7 @@ function Group-Stats($items, $label) {
 }
 
 function Get-Report {
-    $all = Read-Signals
+    $all = @(Read-Signals | Where-Object { $_.manual -ne $true })      # las operaciones manuales se informan aparte
     $cl = @($all | Where-Object { $_.status -eq 'closed' })
     $open = @($all | Where-Object { $_.status -in 'open', 'pending' }).Count
     $un = @($all | Where-Object { $_.status -eq 'unfilled' }).Count
