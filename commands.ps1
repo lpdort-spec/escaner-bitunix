@@ -159,7 +159,7 @@ function Send-Tg($token, $chat, $text, $replyTo = $null) {
 }
 $script:HelpText = @"
 🤖 Bot de Alertas Bitunix · comandos
-/informe SIMBOLO · informe técnico de una cripto o una acción
+/informe SIMBOLO · informe completo de una cripto o una acción (técnico, sentimiento FOMO/FUD, objetivos a 1-3-5 años, insiders, put/call, zonas de volumen, ballenas, derivados, instituciones)
    Ejemplos: /informe BTC · /informe SOL · /informe AAPL · /informe IREN · /informe SAN.MC
    Si hay confusión: /informe COIN accion  o  /informe ARB cripto
 /precio SIMBOLO · precio rápido
@@ -168,8 +168,8 @@ $script:HelpText = @"
 /id · muestra el identificador del chat
 
 En el grupo escribe / y elige el comando del menú del bot (así Telegram añade el nombre del bot solo).
-Qué datos usa: Bitunix (cripto en futuros), Yahoo Finance (bolsa) y CoinGecko (otras criptos). Cada informe cita su fuente y la fecha del dato.
-Qué NO hace: noticias, analistas, ballenas/instituciones, proyecciones ni recomendaciones de compra o venta. Si no hay dato fiable, lo dice.
+Qué datos usa: Bitunix, Binance, Bybit, OKX, Coinbase, Deribit, CoinGecko, Yahoo Finance, SEC EDGAR, CNN y Alternative.me (índices de miedo/codicia). Cada informe cita sus fuentes y dice cuáles respondieron.
+Qué NO hace: noticias, resultados fundamentales, recomendaciones de compra o venta. Los objetivos a 3 y 5 años son escenarios matemáticos, no pronósticos. Si no hay dato fiable, lo dice.
 "@
 
 function Handle-Commands($token, $allowedChats, $offsetFile) {

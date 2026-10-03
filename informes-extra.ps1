@@ -205,11 +205,13 @@ function Build-Extra($s) {
             $L += $(if ($big -gt 0) { "   $big nivel(es) superan 1 M USDT: posible actividad de grandes participantes." } else { "   Ningún nivel supera 1 M USDT." })
         }
     }
-    # 5) ballenas
-    $L += ""; $L += "🐋 BALLENAS (operaciones de más de 1 millón)"
-    if ($s.src -eq 'bitunix') { $L += "• Bitunix no publica el historial de operaciones, y no hay una fuente gratuita y fiable de transferencias de ballenas. Lo más cercano y verificable son las órdenes grandes del libro (arriba), que no son operaciones ejecutadas." }
-    elseif ($s.src -eq 'gecko') { $L += "• No hay una fuente gratuita y fiable de transferencias de ballenas para esta cripto (los exploradores on-chain por token requieren claves de pago o no son fiables en agregado). No lo invento." }
-    else { $L += "• No hay una fuente gratuita y fiable de operaciones de ballenas en bolsa (bloques y dark pools no son públicos al instante). Lo oficial son los formularios 4 de insiders (arriba) y los 13F de fondos, que se publican con hasta 45 días de retraso." }
-    $L += ""; $L += "Fuentes: SEC EDGAR, Yahoo Finance, Deribit, Bitunix y CoinGecko, según el activo. Todo son datos públicos; no es asesoramiento ni garantía."
+    # 5) ballenas, derivados, fundamentales, instituciones (varias plataformas)
+    $L += ""
+    $pl = $null; try { $pl = @(Build-Plataformas $s) } catch { $pl = $null }
+    if ($pl -and $pl.Count) { $L += $pl }
+    else { $L += "🐋 BALLENAS: no se han podido consultar las plataformas ahora mismo; no lo invento." }
+    $L += ""; $L += "Fuentes: SEC EDGAR, Yahoo Finance, Deribit, Binance, Bybit, OKX, Coinbase, Bitunix, CoinGecko y blockchain.com, según el activo. Todo son datos públicos; no es asesoramiento ni garantía."
     return ($L -join "`n")
 }
+
+if (Test-Path (Join-Path $PSScriptRoot "informes-plataformas.ps1")) { . (Join-Path $PSScriptRoot "informes-plataformas.ps1") }

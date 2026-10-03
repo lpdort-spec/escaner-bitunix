@@ -105,6 +105,17 @@ function Get-BookBias($symbol) {                   # % de liquidez compradora en
     return $null
 }
 
+$script:sentCache = $null
+function Get-SentimentLine($side) {                 # índice Crypto Fear & Greed (Alternative.me), caché 30 min. Solo informativo.
+    if (-not $script:sentCache -or ((Get-Date) - $script:sentCache.at).TotalMinutes -gt 30) {
+        $script:sentCache = @{ at = Get-Date; v = $null; y = $null }
+        try { $d = (Invoke-RestMethod "https://api.alternative.me/fng/?limit=2" -TimeoutSec 15).data; $script:sentCache.v = [double]$d[0].value; $script:sentCache.y = [double]$d[1].value } catch {}
+    }
+    $v = $script:sentCache.v; if ($null -eq $v) { return $null }
+    $lab = if ($v -ge 75) { "FOMO extremo" } elseif ($v -ge 56) { "FOMO (codicia)" } elseif ($v -ge 45) { "neutral" } elseif ($v -ge 25) { "FUD (miedo)" } else { "FUD extremo" }
+    $warn = if ($v -ge 75 -and $side -eq "LONG") { " ⚠️ largos tardíos vulnerables" } elseif ($v -le 25 -and $side -eq "SHORT") { " ⚠️ pánico: riesgo de rebote" } else { "" }
+    return ("Sentimiento mercado: {0:N0}/100 · {1} (ayer {2:N0}){3}" -f $v, $lab, $script:sentCache.y, $warn)
+}
 function Get-KeyLevels($symbol, $price) {          # soportes/resistencias (pivotes) por temporalidad + liquidez (máximos/mínimos iguales y muros del libro). Solo informativo.
     $out = @(); $hi = @(); $lo = @()
     foreach ($tf in @("1h", "4h", "1d")) {
@@ -279,6 +290,7 @@ function Scan($iv) {
                 $ctx += ("Funding {0:N3}%{1}" -f $fund, $fx)
             }
             if ($null -ne $book) { $ctx += ("Libro: {0:N0}% compradores / {1:N0}% vendedores" -f $book, (100 - $book)) }
+            $sentTxt = Get-SentimentLine $side; if ($sentTxt) { $ctx += $sentTxt }
             $ctx += @(Get-KeyLevels $t.symbol $entry)
 
             $q = 0.6
