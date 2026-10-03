@@ -312,6 +312,13 @@ function Scan($iv) {
             $stratName = if ($strat -eq "barrido") { "Barrido de liquidez" } else { "Ruptura con retesteo" }
             $poolTxt = if ($pool) { " · $pool" } else { "" }
             $valid = [int](4 * $dur / 60)
+            # --- Riesgo/beneficio, acierto mínimo y distancia a la liquidación ---
+            $rPlan = $W1 * 1 + $W2 * 2 + $W3 * 3
+            $feeR = $FeeRT / $slPct                                          # comisión en unidades de riesgo (R)
+            $pBe2 = (1 + $feeR) / 3 * 100; $pBeP = (1 + $feeR) / ($rPlan + 1) * 100
+            $liqPx = $entry * (1 - $sgn * (1 / $lev - 0.003)); $liqDist = [Math]::Abs($entry - $liqPx) / $entry * 100
+            $slShare = $slPct / $liqDist * 100
+            $rbTxt = ("Riesgo/beneficio: TP1 1:1 · TP2 1:2 · TP3 1:3 · plan completo 1:{0:N1}`nAcierto mínimo para no perder (comisiones incl.): {1:N0}% si el objetivo es TP2 · {2:N0}% con el plan completo`nLiquidación aprox.: {3} ({4:N1}% desde la entrada); el SL queda al {5:N0}% de ese camino {6}" -f $rPlan, $pBe2, $pBeP, (Fmt $liqPx), $liqDist, $slShare, $(if ($slShare -le 50) { "✅" } else { "⚠️" }))
             $msg = ("{0} {1}/USDT {2} {3}  ({4} · {5}){6}`n" +
                 "Apalancamiento: x{7} ({8}; por tu SL llegaría a x{9})`n" +
                 "{10}`n`n" +
@@ -322,14 +329,14 @@ function Scan($iv) {
                 "Si salta el SL: -{26:N0} USDT`n" +
                 "Si llega a TP1 / TP2 / TP3: +{27:N0} / +{28:N0} / +{29:N0} USDT`n" +
                 "Gestión: cierra {30:N0}% en TP1, {31:N0}% en TP2 y {32:N0}% en TP3, y mueve el SL a la entrada tras el TP1 (ganancia total ~+{33:N0} USDT).`n" +
-                "Comisiones estimadas: {34:N1} USDT ({35:N0}% de la ganancia en TP1)`n`n" +
+                "Comisiones estimadas: {34:N1} USDT ({35:N0}% de la ganancia en TP1)`n{41}`n`n" +
                 "Riesgo de la moneda: {36} (vol. 24h {37} USDT, rango diario medio {38:N1}%)`n" +
                 "Motivo: {39}`n{40}") -f
                 $icon, $name, $side, $arrow, $iv, $stratName, $poolTxt, $lev, $plan.Why, $plan.LSl,
                 $(if ($entryType -eq "limit") { "Operación con orden limit (válida unas $valid h; si no se ejecuta, se cancela)" } else { "Entrada a mercado" }),
                 (Fmt $entry), $(if ($entryType -eq "limit") { " (orden limit)" } else { "" }),
                 (Fmt $tp1), $roi1, (Fmt $tp2), $roi2, (Fmt $tp3), $roi3, $tpPct, (Fmt $sl), $slPct, $roiSl, $margin, $MaxMargin, $notional,
-                $lossUsd, $u1, $u2, $u3, ($W1 * 100), ($W2 * 100), ($W3 * 100), $planGain, $feeUsd, $feeShare, $plan.Risk, $volTxt, $dr, $why, ($ctx -join "`n")
+                $lossUsd, $u1, $u2, $u3, ($W1 * 100), ($W2 * 100), ($W3 * 100), $planGain, $feeUsd, $feeShare, $plan.Risk, $volTxt, $dr, $why, ($ctx -join "`n"), $rbTxt
 
             # --- Gráfico estilo TradingView ---
             $photo = $null

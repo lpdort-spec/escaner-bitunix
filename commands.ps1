@@ -163,6 +163,8 @@ $script:HelpText = @"
    Ejemplos: /informe BTC · /informe SOL · /informe AAPL · /informe IREN · /informe SAN.MC
    Si hay confusión: /informe COIN accion  o  /informe ARB cripto
 /precio SIMBOLO · precio rápido
+/riesgo PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · analiza el riesgo/beneficio de tu operación (R:B, acierto mínimo, comisiones, liquidación, estado actual)
+   Ejemplo: /riesgo ETH LARGO 2664.24 2638 2723 135 20
 /resultados · aciertos reales de las señales del bot
 /ayuda · esta ayuda
 /id · muestra el identificador del chat
@@ -171,6 +173,71 @@ En el grupo escribe / y elige el comando del menú del bot (así Telegram añade
 Qué datos usa: Bitunix, Binance, Bybit, OKX, Coinbase, Deribit, CoinGecko, Yahoo Finance, SEC EDGAR, CNN y Alternative.me (índices de miedo/codicia). Cada informe cita sus fuentes y dice cuáles respondieron.
 Qué NO hace: noticias, resultados fundamentales, recomendaciones de compra o venta. Los objetivos a 3 y 5 años son escenarios matemáticos, no pronósticos. Si no hay dato fiable, lo dice.
 "@
+
+# ---------- /riesgo: análisis riesgo/beneficio de una operación con los datos que da el usuario ----------
+function Fpx($x) { if ($x -ge 100) { return ("{0:N2}" -f $x) } elseif ($x -ge 1) { return ("{0:N4}" -f $x) } else { return ("{0:G5}" -f $x) } }
+function Build-RiskReport($ra) {
+    $uso = "Uso: /riesgo PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO`nEjemplo: /riesgo ETH LARGO 2664.24 2638 2723 135 20"
+    if ($ra.Count -lt 7) { return $uso }
+    $symR = (($ra[0] -replace '[^A-Za-z0-9]', '').ToUpper()) -replace 'USDT$', ''
+    $w = $ra[1].ToLower(); $sg = 0
+    if ($w -in 'largo', 'long', 'buy', 'compra') { $sg = 1 } elseif ($w -in 'corto', 'short', 'sell', 'venta') { $sg = -1 }
+    if ($sg -eq 0) { return "Indica LARGO o CORTO.`n$uso" }
+    $nums = @()
+    foreach ($i in 2..6) {
+        $s1 = (($ra[$i] -replace ',', '.') -replace '[^0-9.]', ''); $dv = 0.0
+        if (-not [double]::TryParse($s1, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$dv) -or $dv -le 0) { return "No entiendo el valor '$($ra[$i])'.`n$uso" }
+        $nums += $dv
+    }
+    $en = $nums[0]; $sl = $nums[1]; $tp = $nums[2]; $mg = $nums[3]; $lv = $nums[4]
+    if ($lv -gt 125) { return "Apalancamiento fuera de rango (máx. 125).`n$uso" }
+    if ($sg * ($tp - $en) -le 0) { return "El TP debe estar " + $(if ($sg -eq 1) { "por encima" } else { "por debajo" }) + " de la entrada en una operación " + $(if ($sg -eq 1) { "LARGA" } else { "CORTA" }) + "." }
+    if ($sg * ($sl - $en) -ge $sg * ($tp - $en)) { return "El SL queda más allá del TP; revisa los datos.`n$uso" }
+    $notional = $mg * $lv; $qty = $notional / $en
+    $pSl = $sg * ($sl - $en) * $qty; $pTp = $sg * ($tp - $en) * $qty
+    $feeUsd = $notional * 0.001                                        # estimación 0,10% ida y vuelta
+    $risk = [Math]::Max(0.0, -$pSl)
+    $L = @(); $dirTxt = $(if ($sg -eq 1) { "LARGO" } else { "CORTO" })
+    $L += "📐 ANÁLISIS DE RIESGO/BENEFICIO · $symR $dirTxt x$([Math]::Round($lv, 1))"
+    $L += ("Entrada {0} · SL {1} · TP {2}" -f (Fpx $en), (Fpx $sl), (Fpx $tp))
+    $L += ("Margen {0:N2} USDT · posición {1:N2} USDT · cantidad {2:N4}" -f $mg, $notional, $qty)
+    $L += ""
+    if ($pSl -lt 0) {
+        $okSl = if ($risk / $mg * 100 -le 35) { "✅ dentro del 35% del margen (referencia prudente)" } else { "⚠️ supera el 35% del margen (referencia prudente)" }
+        $L += ("🛑 Si salta el SL: -{0:N2} USDT = {1:N1}% del margen ({2:N2}% de movimiento). {3}" -f $risk, ($risk / $mg * 100), ([Math]::Abs($sl - $en) / $en * 100), $okSl)
+    } else { $L += ("🛑 El SL está en zona de beneficio: si salta, ganas +{0:N2} USDT (+{1:N1}% del margen). Riesgo inicial nulo." -f $pSl, ($pSl / $mg * 100)) }
+    $L += ("🎯 Si llega al TP: +{0:N2} USDT = +{1:N1}% del margen ({2:N2}% de movimiento)" -f $pTp, ($pTp / $mg * 100), ([Math]::Abs($tp - $en) / $en * 100))
+    if ($risk -gt 0) {
+        $rb = $pTp / $risk; $pBe = ($risk + $feeUsd) / ($pTp + $risk) * 100
+        $L += ("⚖️ Riesgo/beneficio: 1 : {0:N2} · acierto mínimo para no perder (comisiones incluidas): {1:N0}%" -f $rb, $pBe)
+        $L += $(if ($rb -ge 2) { "   Lectura: R:B de 2 o más es una estructura sana." } elseif ($rb -ge 1.5) { "   Lectura: aceptable, pero exige acertar con más frecuencia." } else { "   Lectura: ⚠️ R:B bajo; necesitas acertar mucho para compensar." })
+    } else { $L += "⚖️ Riesgo/beneficio: sin riesgo de pérdida con el SL actual (queda el riesgo de ejecución/hueco de precio)." }
+    $L += ("💸 Comisiones estimadas (0,10% ida y vuelta; las reales dependen de tu nivel y de usar limit o mercado): {0:N2} USDT = {1:N0}% de la ganancia en TP" -f $feeUsd, ($feeUsd / $pTp * 100))
+    $L += ("🔁 SL a breakeven (cubre comisiones): ~{0}" -f (Fpx ($en + $sg * $feeUsd / $qty)))
+    if ($lv -gt 1) {
+        $liq = $en * (1 - $sg * (1 / $lv - 0.003)); $liqD = [Math]::Abs($en - $liq) / $en * 100
+        $slOk = ($sg * ($sl - $liq) -gt 0)
+        $L += ("☠️ Liquidación aprox.: {0} ({1:N1}% desde la entrada, margen aislado) · {2}" -f (Fpx $liq), $liqD, $(if ($slOk) { "el SL salta antes ✅" } else { "⚠️ el SL queda DESPUÉS de la liquidación: te liquidarían antes" }))
+    }
+    $px = $null
+    try { $tk = (Invoke-RestMethod "$($script:CmdBase)/tickers?symbols=${symR}USDT" -TimeoutSec 15).data; if ($tk) { $px = [double]@($tk)[0].lastPrice } } catch {}
+    if ($px) {
+        $unr = $sg * ($px - $en) * $qty; $toTp = $sg * ($tp - $px) * $qty; $toSl = $sg * ($px - $sl) * $qty
+        $prog = ($px - $en) / ($tp - $en) * 100
+        $L += ""
+        $L += ("📍 Ahora (Bitunix {0}): {1} · resultado latente {2:+0.00;-0.00} USDT ({3:+0.0;-0.0}% del margen) · recorrido hacia el TP {4:N0}%" -f "${symR}USDT", (Fpx $px), $unr, ($unr / $mg * 100), $prog)
+        if ($toSl -le 0) { $L += "   ⚠️ El precio ya está más allá del SL." }
+        elseif ($toTp -le 0) { $L += "   El precio ya alcanzó el TP." }
+        else {
+            $rr = $toTp / $toSl
+            $L += ("   Desde aquí: puedes ganar {0:N2} USDT más o ceder {1:N2} USDT hasta el SL → R:B restante 1 : {2:N2}" -f $toTp, $toSl, $rr)
+            if ($rr -lt 1 -and $unr -gt 0) { $L += "   ⚠️ El R:B restante es desfavorable. Valora subir el SL a la entrada o por encima (breakeven arriba) para proteger lo ganado; el coste es que el ruido normal te saque antes." }
+        }
+    }
+    $L += ""
+    $L += "Gestión del sistema: parcial en TP1 (1R), SL a la entrada tras TP1, resto hacia TP2/TP3. Cálculo matemático con los datos que has dado; la liquidación es aproximada (depende del margen de mantenimiento de Bitunix). No es asesoramiento ni garantía."
+    return ($L -join "`n")
+}
 
 function Handle-Commands($token, $allowedChats, $offsetFile) {
     $off = 0; if (Test-Path $offsetFile) { try { $off = [long](Get-Content $offsetFile -Raw).Trim() } catch {} }
@@ -202,6 +269,7 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
                 Send-Tg $token $chat "⏳ Preparando el informe de $($args1[0].ToUpper())..." $m.message_id
                 Send-Tg $token $chat (Resolve-Report $args1[0] $mode) $null
             }
+            "/riesgo" { Send-Tg $token $chat (Build-RiskReport $args1) $m.message_id }
             default { }
         }
     }
