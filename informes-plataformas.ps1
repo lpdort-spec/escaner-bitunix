@@ -195,7 +195,7 @@ function Get-StockInstSection($tkr) {
 
 # ---------- Sección completa que se añade al informe ----------
 function Build-Plataformas($s) {
-    $script:PlatOK = @(); $script:PlatFail = @(); $L = @(); $sym = "$($s.sym)".ToUpper()
+    if ($null -eq $script:PlatOK) { $script:PlatOK = @() }; if ($null -eq $script:PlatFail) { $script:PlatFail = @() }; $L = @(); $sym = "$($s.sym)".ToUpper()
     $isCrypto = ($s.src -eq 'gecko' -or $s.src -eq 'bitunix' -or $s.kind -like '*cripto*')
     $sent = Get-MarketSentiment $isCrypto; if ($sent) { $L += "🌡️ " + $sent; $L += "" }
     if ($s.src -in 'bitunix', 'gecko' -and $s.kind -like '*cripto*' -or $s.src -eq 'gecko' -or ($s.src -eq 'bitunix' -and $s.kind -like '*futuro*')) {

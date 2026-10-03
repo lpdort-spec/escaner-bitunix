@@ -146,6 +146,7 @@ function Get-Cagr($tkr) {                           # rentabilidad anual compues
 }
 
 function Build-Extra($s) {
+    $script:PlatOK = @(); $script:PlatFail = @()      # lista de plataformas consultadas: se reinicia al empezar cada informe (así TradingView también consta)
     $px = $s.price; $cur = $s.currency; $sym = $s.sym; $L = @()
     $L += "━━━━━━━━━━━━━━━━━━"
     $L += "🧭 DATOS PARA DECIDIR · $($s.name)"
