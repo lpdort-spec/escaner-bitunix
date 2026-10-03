@@ -105,6 +105,35 @@ function Get-BookBias($symbol) {                   # % de liquidez compradora en
     return $null
 }
 
+function Get-KeyLevels($symbol, $price) {          # soportes/resistencias (pivotes) por temporalidad + liquidez (máximos/mínimos iguales y muros del libro). Solo informativo.
+    $out = @(); $hi = @(); $lo = @()
+    foreach ($tf in @("1h", "4h", "1d")) {
+        try {
+            $k = @((Invoke-RestMethod "$base/kline?symbol=$symbol&interval=$tf&limit=200").data | Sort-Object { [long]$_.time })
+            $k = @($k[0..($k.Count - 2)]); $n = $k.Count; $res = @(); $sup = @()
+            for ($i = 3; $i -lt $n - 3; $i++) {
+                $h = [double]$k[$i].high; $l = [double]$k[$i].low; $isH = $true; $isL = $true
+                foreach ($j in ($i - 3)..($i + 3)) { if ($j -eq $i) { continue }; if ([double]$k[$j].high -ge $h) { $isH = $false }; if ([double]$k[$j].low -le $l) { $isL = $false } }
+                if ($isH) { $res += $h; $hi += $h }; if ($isL) { $sup += $l; $lo += $l }
+            }
+            $r = $res | Where-Object { $_ -gt $price } | Sort-Object | Select-Object -First 1
+            $s = $sup | Where-Object { $_ -lt $price } | Sort-Object -Descending | Select-Object -First 1
+            $txt = @(); if ($s) { $txt += ("soporte {0}" -f (Fmt $s)) }; if ($r) { $txt += ("resistencia {0}" -f (Fmt $r)) }
+            if ($txt.Count) { $out += ("Clave {0}: {1}" -f $tf, ($txt -join " · ")) }
+        } catch {}
+    }
+    # liquidez: grupos de >=2 máximos (o mínimos) con diferencia <0,3% => stops acumulados encima/debajo
+    $pool = {
+        param($vals, $above)
+        $c = @($vals | Where-Object { if ($above) { $_ -gt $price } else { $_ -lt $price } } | Sort-Object); $best = $null
+        foreach ($v in $c) { $g = @($c | Where-Object { [Math]::Abs($_ / $v - 1) -lt 0.003 }); if ($g.Count -ge 2 -and ($null -eq $best -or [Math]::Abs($v - $price) -lt [Math]::Abs($best.p - $price))) { $best = @{ p = ($g | Measure-Object -Average).Average; n = $g.Count } } }
+        return $best
+    }
+    $up = & $pool $hi $true; $dn = & $pool $lo $false
+    $lq = @(); if ($up) { $lq += ("máximos iguales ~{0} ({1} toques, stops de cortos encima)" -f (Fmt $up.p), $up.n) }; if ($dn) { $lq += ("mínimos iguales ~{0} ({1} toques, stops de largos debajo)" -f (Fmt $dn.p), $dn.n) }
+    if ($lq.Count) { $out += ("Liquidez: " + ($lq -join " · ")) }
+    return $out
+}
 function Get-LeveragePlan($vol24h, $dailyRange, $slPct) {
     $lSl = [Math]::Floor(($MaxLossPct / 100) / ($slPct / 100))
     $lLiq = if ($vol24h -ge 500e6) { 25 } elseif ($vol24h -ge 100e6) { 20 } elseif ($vol24h -ge 20e6) { 12 } elseif ($vol24h -ge 5e6) { 8 } elseif ($vol24h -ge 1e6) { 5 } else { 3 }
@@ -250,6 +279,7 @@ function Scan($iv) {
                 $ctx += ("Funding {0:N3}%{1}" -f $fund, $fx)
             }
             if ($null -ne $book) { $ctx += ("Libro: {0:N0}% compradores / {1:N0}% vendedores" -f $book, (100 - $book)) }
+            $ctx += @(Get-KeyLevels $t.symbol $entry)
 
             $q = 0.6
             if ($aligned) { $q += 0.2 }

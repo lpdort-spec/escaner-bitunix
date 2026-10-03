@@ -37,7 +37,7 @@ function Get-BitunixSeries($sym) {
     $bk = (Invoke-RestMethod "$($script:CmdBase)/depth?symbol=${sym}USDT&limit=50").data
     $bv = ($bk.bids | ForEach-Object { [double]$_[0] * [double]$_[1] } | Measure-Object -Sum).Sum; $av = ($bk.asks | ForEach-Object { [double]$_[0] * [double]$_[1] } | Measure-Object -Sum).Sum
     return @{
-        kind = "futuro perpetuo de Bitunix (cripto o activo tokenizado)"; name = "${sym}/USDT"; source = "Bitunix (API pública de futuros)"; currency = "USDT"
+        src = 'bitunix'; sym = $sym; kind = "futuro perpetuo de Bitunix (cripto o activo tokenizado)"; name = "${sym}/USDT"; source = "Bitunix (API pública de futuros)"; currency = "USDT"
         price = [double]$tk.lastPrice; priceNote = "precio en vivo"
         c = @($s | ForEach-Object { [double]$_.close }); h = @($s | ForEach-Object { [double]$_.high }); l = @($s | ForEach-Object { [double]$_.low }); v = @($s | ForEach-Object { [double]$_.quoteVol })
         lastDate = [DateTimeOffset]::FromUnixTimeMilliseconds([long]$s[-1].time).UtcDateTime.AddDays(1).ToString("yyyy-MM-dd")
@@ -54,7 +54,7 @@ function Get-YahooSeries($tkr) {
     $kind = switch ($m.instrumentType) { "EQUITY" { "acción" } "ETF" { "ETF" } "CRYPTOCURRENCY" { "cripto" } "INDEX" { "índice" } default { "valor ($($m.instrumentType))" } }
     $name = if ($m.longName) { "$($m.longName) ($($m.symbol))" } elseif ($m.shortName) { "$($m.shortName) ($($m.symbol))" } else { $m.symbol }
     return @{
-        kind = $kind; name = $name; source = "Yahoo Finance ($($m.fullExchangeName); puede llevar retraso)"; currency = $m.currency
+        src = 'yahoo'; sym = $tkr; kind = $kind; name = $name; source = "Yahoo Finance ($($m.fullExchangeName); puede llevar retraso)"; currency = $m.currency
         price = [double]$m.regularMarketPrice; priceNote = "último precio de mercado"
         c = @($rows | % { $_.c }); h = @($rows | % { $_.h }); l = @($rows | % { $_.l }); v = @($rows | % { $_.v })
         lastDate = [DateTimeOffset]::FromUnixTimeSeconds([long]$m.regularMarketTime).UtcDateTime.ToString("yyyy-MM-dd HH:mm") + " UTC"
@@ -71,7 +71,7 @@ function Get-GeckoSeries($q) {
     if ($pr.Count -lt 30) { return $null }
     $pr = @($pr[0..($pr.Count - 2)]) ; $vo = @($vo[0..($vo.Count - 2)])                       # el último punto es del día en curso
     return @{
-        kind = "cripto (sin par directo en Bitunix con este símbolo)"; name = "$($coin.name) ($($coin.symbol))"; source = "CoinGecko (precios diarios agregados)"; currency = "USD"
+        src = 'gecko'; sym = $coin.symbol; kind = "cripto (sin par directo en Bitunix con este símbolo)"; name = "$($coin.name) ($($coin.symbol))"; source = "CoinGecko (precios diarios agregados)"; currency = "USD"
         price = $pr[-1]; priceNote = "último cierre diario"; c = $pr; h = $null; l = $null; v = $vo
         lastDate = [DateTimeOffset]::FromUnixTimeMilliseconds([long]$d.prices[-2][0]).UtcDateTime.ToString("yyyy-MM-dd"); extra = @{ rank = $coin.market_cap_rank }
     }
@@ -120,7 +120,7 @@ function Build-Report($s) {
     $L += ("⚖️ Derivados Bitunix: funding {0:N4}% por 8h · volumen 24h {1} · libro de órdenes {2:N0}% compradores" -f $s.extra.funding, $vv, $s.extra.bookBuy) }
     if ($s.extra.rank) { $L += "Ranking por capitalización (CoinGecko): #$($s.extra.rank)" }
     $L += ""
-    $L += "❗ NO incluido (el bot no tiene una fuente gratuita y fiable para automatizarlo, así que no se inventa): noticias, resultados de empresa, objetivos de analistas, compras/ventas de instituciones o ballenas, ETF, proyecciones. Para eso consulta fuentes oficiales (SEC/CNMV, web de la empresa, exchange) o pídeselo a Luis."
+    $L += "❗ NO incluido (sin fuente gratuita y fiable automatizable, así que no se inventa): noticias, resultados trimestrales y valoración fundamental. Consúltalo en fuentes oficiales (SEC/CNMV, web de la empresa) o pídeselo a Luis."
     $L += "Es información técnica calculada con datos públicos; no es asesoramiento ni garantía."
     return ($L -join "`n")
 }
@@ -147,7 +147,7 @@ function Resolve-Report($raw, $mode) {
         if (-not $s -and $mode -ne "accion") { try { $s = Get-GeckoSeries $base } catch {} }
     }
     if (-not $s) { return "No he podido obtener datos fiables de '$q'. Prueba con el símbolo bursátil exacto (AAPL, MSFT, IREN, SAN.MC para España) o el ticker de la cripto (BTC, SOL). Si el símbolo es correcto, puede que la fuente esté caída: inténtalo más tarde. No voy a inventar datos." }
-    try { $rep = Build-Report $s; if ($note) { $rep += "`n" + $note }; return $rep } catch { return "Tengo datos de '$q' pero ha fallado el cálculo del informe. No envío cifras dudosas." }
+    try { $rep = Build-Report $s; if ($note) { $rep += "`n" + $note }; try { $rep += "`n`n" + (Build-Extra $s) } catch { $rep += "`n`n(Las secciones de objetivos, insiders, opciones y volumen no se han podido generar ahora; no envío datos dudosos.)" }; return $rep } catch { return "Tengo datos de '$q' pero ha fallado el cálculo del informe. No envío cifras dudosas." }
 }
 
 # ---------- Telegram ----------
@@ -206,3 +206,5 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
         }
     }
 }
+
+if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }
