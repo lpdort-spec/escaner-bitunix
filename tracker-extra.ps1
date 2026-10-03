@@ -20,16 +20,17 @@ function Set-ReportState($key, $value) {
 }
 
 # ---------- Operaciones manuales ----------
-function New-ManualRecord($sym, [int]$sg, [double]$en, [double]$sl, [double]$tp, [double]$mg, [double]$lv, $qtyOverride = $null, $id = $null) {
+function New-ManualRecord($sym, [int]$sg, [double]$en, [double]$sl, [double]$tp, [double]$mg, [double]$lv, $qtyOverride = $null, $id = $null, $sl0 = $null) {
     $qty = if ($qtyOverride) { [double]$qtyOverride } else { $mg * $lv / $en }
-    $loss = $sg * ($sl - $en) -lt 0
-    $riskAbs = if ($loss) { [Math]::Abs($en - $sl) } else { 0.35 * $mg / $qty }       # SL ya en beneficio: R de referencia = 35% del margen (regla del usuario)
+    $slRef = if ($sl0) { [double]$sl0 } else { $sl }                                  # SL inicial (si el SL actual ya se movió a beneficio)
+    $loss = $sg * ($slRef - $en) -lt 0
+    $riskAbs = if ($loss) { [Math]::Abs($en - $slRef) } else { 0.35 * $mg / $qty }     # sin SL inicial en pérdida: R de referencia = 35% del margen (regla del usuario)
     $lastLabel = [long]0
     try { $k = @((Invoke-RestMethod "$($script:TrkBase)/kline?symbol=${sym}USDT&interval=1h&limit=5" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $lastLabel = [long]$k[$k.Count - 2].time } catch {}
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     return [ordered]@{
         id = $(if ($id) { $id } else { "manual-$sym-$now" }); time = $now; sym = "${sym}USDT"; tf = "1h"; strat = "manual"; side = $sg
-        entryType = "market"; entry = $en; sl = $sl; sl0 = $sl; tp1 = $tp; tp2 = $tp; tp3 = $tp; riskAbs = $riskAbs; slPct = ($riskAbs / $en * 100)
+        entryType = "market"; entry = $en; sl = $sl; sl0 = $slRef; tp1 = $tp; tp2 = $tp; tp3 = $tp; riskAbs = $riskAbs; slPct = ($riskAbs / $en * 100)
         lev = $lv; margin = $mg; qty = $qty; ratio = $null; trend = $null; aligned = $null; btcAligned = $null; squeeze = $null; pool = ""; funding = $null; book = $null
         risk = "MANUAL"; roiTp2 = $null; status = "open"; stage = 0; realized = 0.0; age = 0; lastLabel = $lastLabel; lab0 = $lastLabel
         outcome = $null; R = $null; net = $null; manual = $true; mode = "single"; exit = $null; pnlUsd = $null; note = $null; closedAt = $null; sentiment = $null; closeNote = $null
@@ -52,8 +53,19 @@ function Import-ManualTrades($file) {
     try { $list = Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return }
     $have = @(Read-Signals | ForEach-Object { $_.id })
     foreach ($m in $list) {
-        if (-not $m.id -or $m.id -in $have) { continue }
-        $rec = New-ManualRecord $m.sym ([int]$m.side) ([double]$m.entry) ([double]$m.sl) ([double]$m.tp) ([double]$m.margin) ([double]$m.lev) $m.qty $m.id
+        if (-not $m.id) { continue }
+        if ($m.id -in $have) {
+            # ya importada: si el fichero trae un SL inicial distinto, se corrige la R de referencia (solo mientras sigue abierta)
+            if ($m.sl0) {
+                $sigs = @(Read-Signals); $ex = $sigs | Where-Object { $_.id -eq $m.id -and $_.status -eq 'open' } | Select-Object -First 1
+                if ($ex -and [double]$ex.sl0 -ne [double]$m.sl0) {
+                    $ex.sl0 = [double]$m.sl0; $ex.riskAbs = [Math]::Abs([double]$ex.entry - [double]$m.sl0); $ex.slPct = [double]$ex.riskAbs / [double]$ex.entry * 100
+                    Save-Signals $sigs; Write-Host ("R de referencia corregida con el SL inicial: {0}" -f $m.id) -ForegroundColor Cyan
+                }
+            }
+            continue
+        }
+        $rec = New-ManualRecord $m.sym ([int]$m.side) ([double]$m.entry) ([double]$m.sl) ([double]$m.tp) ([double]$m.margin) ([double]$m.lev) $m.qty $m.id $m.sl0
         if ($m.note) { $rec.note = $m.note }
         Add-SignalRecord $rec
         Write-Host ("Operación manual importada al seguimiento: {0} {1}" -f $m.sym, $m.id) -ForegroundColor Cyan
