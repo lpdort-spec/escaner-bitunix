@@ -34,6 +34,7 @@ if ($StateFile -and (Test-Path $StateFile)) { foreach ($k in @(Get-Content $Stat
 . (Join-Path $PSScriptRoot "tracker.ps1")
 if (Test-Path (Join-Path $PSScriptRoot "tracker-extra.ps1")) { . (Join-Path $PSScriptRoot "tracker-extra.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informe-semanal.ps1")) { . (Join-Path $PSScriptRoot "informe-semanal.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "analisis-tecnico.ps1")) { . (Join-Path $PSScriptRoot "analisis-tecnico.ps1") }
 $hasCmds = $false
 if (Test-Path (Join-Path $PSScriptRoot "commands.ps1")) { . (Join-Path $PSScriptRoot "commands.ps1"); $hasCmds = $true }
 $TelegramSignalChatId = $env:TELEGRAM_SIGNAL_CHAT_ID
@@ -175,11 +176,12 @@ function Send-Alert($key, $msg, $photo = $null) {
     if ($TelegramToken -and $TelegramChatId) {
         foreach ($cid in $sigChats) {          # destinos de las señales: solo el grupo privado de futuros (o todos si no se ha configurado)
             $cid = $cid.Trim(); if (-not $cid) { continue }
+            if ($photo -and $hasChart) { try { [void](Send-TelegramPhoto $TelegramToken $cid $photo (($msg -split "`n")[0])) } catch {} }      # el gráfico va primero con el título; el detalle completo va en el mensaje
             $sent = $false
-            if ($photo -and $hasChart -and $msg.Length -le 1000) { $sent = Send-TelegramPhoto $TelegramToken $cid $photo $msg }
             if (-not $sent) {
                 try {
-                    $json = @{ chat_id = $cid; text = $msg } | ConvertTo-Json -Compress
+                    $txt = if ($msg.Length -gt 3900) { $msg.Substring(0, 3890) + "…" } else { $msg }
+                    $json = @{ chat_id = $cid; text = $txt } | ConvertTo-Json -Compress
                     Invoke-RestMethod "https://api.telegram.org/bot$TelegramToken/sendMessage" -Method Post -ContentType "application/json; charset=utf-8" -Body ([System.Text.Encoding]::UTF8.GetBytes($json)) | Out-Null
                 } catch {}
             }
@@ -298,6 +300,7 @@ function Scan($iv) {
             if ($null -ne $book) { $ctx += ("Libro: {0:N0}% compradores / {1:N0}% vendedores" -f $book, (100 - $book)) }
             $sentTxt = Get-SentimentLine $side; if ($sentTxt) { $ctx += $sentTxt }
             $ctx += @(Get-KeyLevels $t.symbol $entry)
+            if (Get-Command Get-TradeTechNote -ErrorAction SilentlyContinue) { try { $ctx += @(""; Get-TradeTechNote ($t.symbol -replace 'USDT$', '') $sgn $entry $sl $tp3 -Short) } catch {} }      # charting, Fibonacci, Bollinger y TradingView (informativo)
 
             $q = 0.6
             if ($aligned) { $q += 0.2 }

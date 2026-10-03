@@ -97,6 +97,7 @@ function Get-ManualSection {
                 $toTp = $sgn * ([double]$m.tp1 - $px) * $q; $toSl = $sgn * ($px - [double]$m.sl) * $q
                 $rr = if ($toSl -gt 0) { " · R:B restante 1:{0:N2}" -f ($toTp / $toSl) } else { "" }
                 $L += ("• {0} {1} x{2:N0} ABIERTA · entrada {3} · ahora {4} · latente {5:+0.00;-0.00} USDT ({6:+0.0;-0.0}% del margen) · SL {7} · TP {8}{9}" -f $name, $dir, [double]$m.lev, (Fmt ([double]$m.entry)), (Fmt $px), $unr, ($unr / [double]$m.margin * 100), (Fmt ([double]$m.sl)), (Fmt ([double]$m.tp1)), $rr)
+                if (Get-Command Get-TradeTechNote -ErrorAction SilentlyContinue) { try { $L += @(Get-TradeTechNote $name $sgn ([double]$m.entry) ([double]$m.sl) ([double]$m.tp1) -Short | ForEach-Object { "   " + $_ }) } catch {} }
             } else { $L += ("• {0} {1} ABIERTA · entrada {2} · SL {3} · TP {4} (sin precio ahora)" -f $name, $dir, (Fmt ([double]$m.entry)), (Fmt ([double]$m.sl)), (Fmt ([double]$m.tp1))) }
         } else {
             $pnl = [double]$m.pnlUsd; $tot += $pnl

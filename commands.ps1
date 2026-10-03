@@ -55,7 +55,7 @@ function Get-YahooSeries($tkr) {
     $kind = switch ($m.instrumentType) { "EQUITY" { "acción" } "ETF" { "ETF" } "CRYPTOCURRENCY" { "cripto" } "INDEX" { "índice" } default { "valor ($($m.instrumentType))" } }
     $name = if ($m.longName) { "$($m.longName) ($($m.symbol))" } elseif ($m.shortName) { "$($m.shortName) ($($m.symbol))" } else { $m.symbol }
     return @{
-        src = 'yahoo'; sym = $tkr; kind = $kind; name = $name; source = "Yahoo Finance ($($m.fullExchangeName); puede llevar retraso)"; currency = $m.currency
+        src = 'yahoo'; exch = "$($m.fullExchangeName)"; sym = $tkr; kind = $kind; name = $name; source = "Yahoo Finance ($($m.fullExchangeName); puede llevar retraso)"; currency = $m.currency
         price = [double]$m.regularMarketPrice; priceNote = "último precio de mercado"
         c = @($rows | % { $_.c }); h = @($rows | % { $_.h }); l = @($rows | % { $_.l }); v = @($rows | % { $_.v })
         lastDate = [DateTimeOffset]::FromUnixTimeSeconds([long]$m.regularMarketTime).UtcDateTime.ToString("yyyy-MM-dd HH:mm") + " UTC"
@@ -72,7 +72,7 @@ function Get-GeckoSeries($q) {
     if ($pr.Count -lt 30) { return $null }
     $pr = @($pr[0..($pr.Count - 2)]) ; $vo = @($vo[0..($vo.Count - 2)])                       # el último punto es del día en curso
     return @{
-        src = 'gecko'; sym = $coin.symbol; kind = "cripto (sin par directo en Bitunix con este símbolo)"; name = "$($coin.name) ($($coin.symbol))"; source = "CoinGecko (precios diarios agregados)"; currency = "USD"
+        src = 'gecko'; id = $coin.id; sym = $coin.symbol; kind = "cripto (sin par directo en Bitunix con este símbolo)"; name = "$($coin.name) ($($coin.symbol))"; source = "CoinGecko (precios diarios agregados)"; currency = "USD"
         price = $pr[-1]; priceNote = "último cierre diario"; c = $pr; h = $null; l = $null; v = $vo
         lastDate = [DateTimeOffset]::FromUnixTimeMilliseconds([long]$d.prices[-2][0]).UtcDateTime.ToString("yyyy-MM-dd"); extra = @{ rank = $coin.market_cap_rank }
     }
@@ -160,17 +160,17 @@ function Send-Tg($token, $chat, $text, $replyTo = $null) {
 }
 $script:HelpText = @"
 🤖 Bot de Alertas Bitunix · comandos
-/informe SIMBOLO · informe completo de una cripto o una acción (técnico, sentimiento FOMO/FUD, objetivos a 1-3-5 años, insiders, put/call, zonas de volumen, ballenas, derivados, instituciones)
+/informe SIMBOLO · informe completo de una cripto o una acción (técnico, charting, Fibonacci, Bollinger, TradingView, sentimiento FOMO/FUD, objetivos a 1-3-5 años, insiders, put/call, zonas de volumen, ballenas, derivados, instituciones)
    Ejemplos: /informe BTC · /informe SOL · /informe AAPL · /informe IREN · /informe SAN.MC
    Si hay confusión: /informe COIN accion  o  /informe ARB cripto
 /precio SIMBOLO · precio rápido
-/riesgo PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · analiza el riesgo/beneficio de tu operación (R:B, acierto mínimo, comisiones, liquidación, estado actual)
+/riesgo PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · analiza el riesgo/beneficio de tu operación (R:B, acierto mínimo, comisiones, liquidación, estado actual) y su lectura técnica (soportes/resistencias, Fibonacci, TradingView)
    Ejemplo: /riesgo ETH LARGO 2664.24 2638 2723 135 20
 /ayuda · esta ayuda
 /id · muestra el identificador del chat
 
 En el grupo escribe / y elige el comando del menú del bot (así Telegram añade el nombre del bot solo).
-Qué datos usa: Bitunix, Binance, Bybit, OKX, Coinbase, Deribit, CoinGecko, Yahoo Finance, SEC EDGAR, CNN y Alternative.me (índices de miedo/codicia). Cada informe cita sus fuentes y dice cuáles respondieron.
+Qué datos usa: Bitunix, TradingView (lectura pública de su escáner técnico), Binance, Bybit, OKX, Coinbase, Deribit, CoinGecko, Yahoo Finance, SEC EDGAR, CNN y Alternative.me (índices de miedo/codicia). Cada informe cita sus fuentes y dice cuáles respondieron.
 Qué NO hace: noticias, resultados fundamentales, recomendaciones de compra o venta. Los objetivos a 3 y 5 años son escenarios matemáticos, no pronósticos. Si no hay dato fiable, lo dice.
 "@
 
@@ -234,6 +234,7 @@ function Build-RiskReport($ra) {
             if ($rr -lt 1 -and $unr -gt 0) { $L += "   ⚠️ El R:B restante es desfavorable. Valora subir el SL a la entrada o por encima (breakeven arriba) para proteger lo ganado; el coste es que el ruido normal te saque antes." }
         }
     }
+    if ($px -and (Get-Command Get-TradeTechNote -ErrorAction SilentlyContinue)) { $L += ""; try { $L += @(Get-TradeTechNote $symR $sg $en $sl $tp) } catch { $L += "🧮 Análisis técnico: no disponible ahora." } }
     $L += ""
     $L += "Gestión del sistema: parcial en TP1 (1R), SL a la entrada tras TP1, resto hacia TP2/TP3. Cálculo matemático con los datos que has dado; la liquidación es aproximada (depende del margen de mantenimiento de Bitunix). No es asesoramiento ni garantía."
     return ($L -join "`n")
@@ -304,6 +305,9 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
                 try { $tk = (Invoke-RestMethod "$($script:CmdBase)/tickers").data | Where-Object symbol -eq "$($q -replace 'USDT$','')USDT"; if ($tk) { $out = "{0}/USDT: {1} USDT ({2:+0.00;-0.00}% en 24h). Fuente: Bitunix, en vivo." -f ($q -replace 'USDT$',''), (Fnum ([double]$tk.lastPrice)), ((([double]$tk.lastPrice - [double]$tk.open) / [double]$tk.open) * 100) } } catch {}
                 if (-not $out) { $y = Get-YahooSeries $q; if ($y) { $out = "{0}: {1} {2}. Fuente: Yahoo Finance ({3}); puede llevar retraso." -f $y.name, (Fnum $y.price), $y.currency, $y.lastDate } }
                 if (-not $out) { $out = "No he podido obtener un precio fiable de '$q'. No voy a inventarlo." }
+                elseif (Get-Command Resolve-TvTarget -ErrorAction SilentlyContinue) {
+                    try { $isBx = $out -like '*Bitunix*'; $tvT = Resolve-TvTarget $(if ($isBx) { 'bitunix' } else { 'yahoo' }) ($q -replace 'USDT$', '') $null; $out += "`n" + ((Get-TvLines $tvT -Short) -join "`n") } catch {}
+                }
                 Send-Tg $token $chat $out $m.message_id
             }
             "/informe" {
@@ -318,4 +322,5 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
     }
 }
 
+if (Test-Path (Join-Path $PSScriptRoot "analisis-tecnico.ps1")) { . (Join-Path $PSScriptRoot "analisis-tecnico.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }

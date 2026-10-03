@@ -149,6 +149,8 @@ function Build-Extra($s) {
     $px = $s.price; $cur = $s.currency; $sym = $s.sym; $L = @()
     $L += "━━━━━━━━━━━━━━━━━━"
     $L += "🧭 DATOS PARA DECIDIR · $($s.name)"
+    # 0) análisis técnico avanzado (charting, Fibonacci, Bollinger...) y TradingView
+    if (Get-Command Get-AdvancedTechSection -ErrorAction SilentlyContinue) { $L += ""; try { $L += @(Get-AdvancedTechSection $s) } catch { $L += "🧮 Análisis técnico avanzado: no disponible ahora." } }
     # 1) objetivos
     $L += ""; $L += "🎯 OBJETIVOS DE PRECIO"
     $tg = $null; if ($s.src -eq 'yahoo' -and $s.kind -in 'acción', 'ETF') { $tg = Get-YahooTargets $sym }
