@@ -88,6 +88,10 @@ function Get-WhaleSection($SYM, [double]$minUsd = 1000000) {
             $L += ("   - {0:HH:mm} UTC · {1} · {2} agresiva de {3} USD a ~{4}" -f [datetimeoffset]::FromUnixTimeMilliseconds($x.ts).UtcDateTime, $x.venue, $(if ($x.side -eq "n/d") { "operación" } else { $x.side.ToLower() }), (Fm $x.usd), (Fnum $x.px))
         }
     }
+    $miss = @()
+    if (-not ($src | Where-Object { $_.venue -eq 'Binance Futuros' })) { $miss += 'Binance Futuros' }
+    if (-not ($src | Where-Object { $_.venue -eq 'Bybit Futuros' })) { $miss += 'Bybit' }
+    if ($miss.Count) { $L += ("  ⚠️ Sin {0} (bloqueado desde el servidor del bot): el recuento de ballenas es PARCIAL, porque son de las plataformas con más volumen, y puede no reflejar el balance real de compras y ventas." -f ($miss -join ' ni ')) }
     $L += "  (Agresión compradora = la orden que ejecuta fue de compra a mercado. Es una ventana de minutos u horas, no un historial completo; ninguna plataforma gratuita da más atrás.)"
     return $L
 }
