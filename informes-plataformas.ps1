@@ -70,6 +70,7 @@ function Get-WhaleSection($SYM, [double]$minUsd = 1000000) {
     $b = Get-BinanceTrades "https://api.binance.com" "/api/v3/aggTrades" "Binance Spot" $SYM
     if (-not $b) { $b = Get-BinanceTrades "https://data-api.binance.vision" "/api/v3/aggTrades" "Binance Spot" $SYM }
     $src += $b; $src += Get-BybitTrades $SYM; $src += Get-OkxTrades $SYM; $src += Get-CoinbaseTrades $SYM
+    $src += Get-GateTrades $SYM; $src += Get-DeribitPerpTrades $SYM; $src += Get-BitgetTrades $SYM; $src += Get-KrakenFutTrades $SYM
     $src = @($src | Where-Object { $_ })
     if ($src.Count -eq 0) { $L += "• Ninguna plataforma devolvió operaciones para $SYM (no cotiza en ellas o no respondieron desde el servidor). No lo invento."; return $L }
     $big = @()
@@ -120,6 +121,7 @@ function Get-DerivSection($SYM) {
         if ($ls -and $ls.data -and $ls.data.Count) { $rt = [double]$ls.data[0][1]; $x += " · cuentas: {0:N0}% largos / {1:N0}% cortos" -f (100 * $rt / (1 + $rt)), (100 / (1 + $rt)) }
         $rows += $x
     }
+    try { $rows += @(Get-DerivBackupRows $SYM) } catch {}
     $L += "⚖️ POSICIONAMIENTO EN DERIVADOS (otras plataformas)"
     if ($rows.Count -eq 0) { $L += "• Sin datos: el activo no cotiza en Binance/Bybit/OKX o no respondieron."; return $L }
     $L += $rows
@@ -241,4 +243,76 @@ function Get-MarketSentiment([bool]$crypto) {                  # devuelve una l�
     }
     $script:SentCache[$key] = @{ txt = $txt; at = Get-Date }
     return $txt
+}
+
+# ---------- Respaldo para futuros: plataformas que no bloquean los servidores de EE. UU. (Gate.io, Bitget, Deribit, Kraken Futures, Hyperliquid) ----------
+function New-Venue($name, $rows) {
+    $rows = @($rows | Where-Object { $_ }); if ($rows.Count -eq 0) { return $null }
+    return @{ venue = $name; rows = $rows; first = ($rows | Measure-Object ts -Minimum).Minimum; last = ($rows | Measure-Object ts -Maximum).Maximum }
+}
+function Get-GateTrades($sym) {                                 # size>0: agresión compradora; contratos x multiplicador = monedas
+    $c = Plat-Get "Gate.io" "https://api.gateio.ws/api/v4/futures/usdt/contracts/${sym}_USDT"
+    if (-not $c -or -not $c.quanto_multiplier) { return $null }
+    $mult = [double]$c.quanto_multiplier
+    $r = Plat-Get "Gate.io" "https://api.gateio.ws/api/v4/futures/usdt/trades?contract=${sym}_USDT&limit=1000"
+    if (-not $r) { return $null }
+    $rows = @($r) | ForEach-Object { [pscustomobject]@{ ts = [long]([double]$_.create_time_ms * 1000); side = $(if ([double]$_.size -gt 0) { "COMPRA" } else { "VENTA" }); px = [double]$_.price; usd = [Math]::Abs([double]$_.size) * $mult * [double]$_.price; venue = "Gate.io Futuros" } }
+    return (New-Venue "Gate.io Futuros" $rows)
+}
+function Get-DeribitPerpTrades($sym) {                          # perpetuo inverso: amount ya viene en USD
+    if ($sym -notin 'BTC', 'ETH') { return $null }
+    $r = Plat-Get "Deribit" "https://www.deribit.com/api/v2/public/get_last_trades_by_instrument?instrument_name=$sym-PERPETUAL&count=1000"
+    if (-not $r -or -not $r.result.trades) { return $null }
+    $rows = @($r.result.trades) | ForEach-Object { [pscustomobject]@{ ts = [long]$_.timestamp; side = $(if ($_.direction -eq "buy") { "COMPRA" } else { "VENTA" }); px = [double]$_.price; usd = [double]$_.amount; venue = "Deribit Perpetuo" } }
+    return (New-Venue "Deribit Perpetuo" $rows)
+}
+function Get-BitgetTrades($sym) {
+    $r = Plat-Get "Bitget" "https://api.bitget.com/api/v2/mix/market/fills?symbol=${sym}USDT&productType=USDT-FUTURES&limit=100"
+    if (-not $r -or $r.code -ne "00000" -or -not $r.data) { return $null }
+    $rows = @($r.data) | ForEach-Object { [pscustomobject]@{ ts = [long]$_.ts; side = $(if ($_.side -eq "buy") { "COMPRA" } else { "VENTA" }); px = [double]$_.price; usd = [double]$_.price * [double]$_.size; venue = "Bitget Futuros" } }
+    return (New-Venue "Bitget Futuros" $rows)
+}
+function Get-KrakenFutTrades($sym) {
+    $m = if ($sym -eq 'BTC') { 'XBT' } else { $sym }
+    $r = Plat-Get "Kraken Futures" "https://futures.kraken.com/derivatives/api/v3/history?symbol=PF_${m}USD"
+    if (-not $r -or $r.result -ne "success" -or -not $r.history) { return $null }
+    $rows = @($r.history) | ForEach-Object { [pscustomobject]@{ ts = [datetimeoffset]::Parse($_.time, [Globalization.CultureInfo]::InvariantCulture).ToUnixTimeMilliseconds(); side = $(if ($_.side -eq "buy") { "COMPRA" } else { "VENTA" }); px = [double]$_.price; usd = [double]$_.price * [double]$_.size; venue = "Kraken Futuros" } }
+    return (New-Venue "Kraken Futuros" $rows)
+}
+function Get-HyperliquidCtx($sym) {                             # interés abierto y funding (Hyperliquid cobra el funding cada hora)
+    try {
+        if (-not $script:HLCtx -or ((Get-Date) - $script:HLCtxAt).TotalSeconds -gt 90) {
+            $script:HLCtx = Invoke-RestMethod -Uri "https://api.hyperliquid.xyz/info" -Method Post -ContentType "application/json" -Body '{"type":"metaAndAssetCtxs"}' -Headers $script:PUA -TimeoutSec 20; $script:HLCtxAt = Get-Date
+        }
+        $names = @($script:HLCtx[0].universe | ForEach-Object { $_.name })
+        $i = [array]::IndexOf($names, $sym); if ($i -lt 0) { $i = [array]::IndexOf($names, "k$sym") }
+        if ($i -lt 0) { return $null }
+        if ("Hyperliquid" -notin $script:PlatOK) { $script:PlatOK += "Hyperliquid" }
+        $c = $script:HLCtx[1][$i]
+        return @{ oiUsd = [double]$c.openInterest * [double]$c.markPx; fund8h = [double]$c.funding * 8 * 100 }
+    } catch { if ("Hyperliquid" -notin $script:PlatFail -and "Hyperliquid" -notin $script:PlatOK) { $script:PlatFail += "Hyperliquid" }; return $null }
+}
+function Get-DerivBackupRows($SYM) {
+    $rows = @()
+    $c = Plat-Get "Gate.io" "https://api.gateio.ws/api/v4/futures/usdt/contracts/${SYM}_USDT"
+    $st = Plat-Get "Gate.io" "https://api.gateio.ws/api/v4/futures/usdt/contract_stats?contract=${SYM}_USDT&interval=1h&limit=2"
+    if ($c -and $st) {
+        $s = @($st | Sort-Object time)[-1]; $lsr = [double]$s.lsr_account; $top = [double]$s.top_lsr_size
+        $x = "• Gate.io: interés abierto {0} USD · funding {1:N4}% por 8h · cuentas: {2:N0}% largos / {3:N0}% cortos · grandes traders (tamaño): {4:N0}% largos / {5:N0}% cortos" -f (Fm ([double]$s.open_interest_usd)), ([double]$c.funding_rate * 100), (100 * $lsr / (1 + $lsr)), (100 / (1 + $lsr)), (100 * $top / (1 + $top)), (100 / (1 + $top))
+        $ll = [double]$s.long_liq_usd; $sl2 = [double]$s.short_liq_usd
+        if ($ll + $sl2 -gt 0) { $x += " · liquidaciones en la última hora: largos {0} USD / cortos {1} USD" -f (Fm $ll), (Fm $sl2) }
+        $rows += $x
+    }
+    $bo = Plat-Get "Bitget" "https://api.bitget.com/api/v2/mix/market/open-interest?symbol=${SYM}USDT&productType=USDT-FUTURES"
+    $bl = Plat-Get "Bitget" "https://api.bitget.com/api/v2/mix/market/account-long-short?symbol=${SYM}USDT&period=1h"
+    $bf = Plat-Get "Bitget" "https://api.bitget.com/api/v2/mix/market/current-fund-rate?symbol=${SYM}USDT&productType=USDT-FUTURES"
+    if ($bo -and $bo.code -eq "00000" -and $bo.data.openInterestList) {
+        $x = "• Bitget: interés abierto {0:N0} {1}" -f [double]$bo.data.openInterestList[0].size, $SYM
+        if ($bf -and $bf.data) { $x += " · funding {0:N4}% por 8h" -f ([double]$bf.data[0].fundingRate * 100) }
+        if ($bl -and $bl.data) { $l1 = @($bl.data | Sort-Object { [long]$_.ts })[-1]; $x += " · cuentas: {0:N0}% largos / {1:N0}% cortos" -f (100 * [double]$l1.longAccountRatio), (100 * [double]$l1.shortAccountRatio) }
+        $rows += $x
+    }
+    $hl = Get-HyperliquidCtx $SYM
+    if ($hl) { $rows += ("• Hyperliquid (DEX): interés abierto {0} USD · funding {1:N4}% por 8h equivalente" -f (Fm $hl.oiUsd), $hl.fund8h) }
+    return $rows
 }

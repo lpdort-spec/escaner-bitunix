@@ -23,6 +23,7 @@ param(
     [switch]$NoChart,
     [switch]$Once
 )
+try { [Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo("es-ES") } catch {}   # formato español también en la nube (2.664,24)
 $base = "https://fapi.bitunix.com/api/v1/futures/market"
 $log = Join-Path $PSScriptRoot "alertas.log"
 $seen = @{}

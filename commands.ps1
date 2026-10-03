@@ -1,6 +1,7 @@
 ﻿# Comandos del bot de Telegram: informes técnicos bajo demanda de cualquier cripto o acción.
 # Regla de oro: solo cifras calculadas a partir de datos de mercado reales y citando la fuente. Lo que no se puede obtener, se dice.
 # Fuentes: Bitunix (futuros cripto, API pública), Yahoo Finance (cotizaciones de bolsa), CoinGecko (otras criptos).
+try { [Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo("es-ES") } catch {}   # formato español también en la nube (2.664,24)
 $script:CmdBase = "https://fapi.bitunix.com/api/v1/futures/market"
 $script:LastCmd = @{}
 $script:UA = @{ 'User-Agent' = 'Mozilla/5.0 (compatible; AlertasBitunix/1.0)' }
