@@ -6,6 +6,10 @@ function Import-GroupTracking($file) {
     if (-not (Test-Path $file)) { return }
     $items = Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json; $have = @(Read-Signals | ForEach-Object { $_.id })
     foreach ($i in $items) {
+        if ($i.retira) {      # elimina registros erróneos (p. ej. con velas anteriores a la apertura de la operación)
+            $all0 = Read-Signals; $ids0 = @($i.retira); $keep0 = @($all0 | Where-Object { $_.id -notin $ids0 }); if ($keep0.Count -ne $all0.Count) { Save-Signals $keep0 }
+            $have = @(Read-Signals | ForEach-Object { $_.id }); continue
+        }
         if ($i.id -in $have) {
             if ($i.replace -eq $true) {
                 $all = Read-Signals; $r0 = $all | Where-Object { $_.id -eq $i.id } | Select-Object -First 1
@@ -18,6 +22,7 @@ function Import-GroupTracking($file) {
         }
         $lastLabel = [long]0
         try { $k = @((Invoke-RestMethod "$($script:TrkBase)/kline?symbol=$($i.sym)USDT&interval=4h&limit=5" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $lastLabel = [long]$k[$k.Count - 2].time } catch { continue }
+        if ($i.desdeLabel) { $lastLabel = [long]$i.desdeLabel }      # primera vela que cuenta = la posterior a esta (nunca velas anteriores a la apertura real de la operación)
         $sg = [int]$i.side; $en = [double]$i.entry; $sl = [double]$i.sl; $risk = [Math]::Abs($en - $sl)
         Add-SignalRecord ([ordered]@{
             id = $i.id; time = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); sym = "$($i.sym)USDT"; tf = "4h"; strat = $(if ($i.dest -eq "privado") { "seg-priv" } else { "seg-grupo" }); side = $sg
