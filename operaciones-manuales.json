@@ -2,13 +2,13 @@
   {
     "id": "manual-eth-20261003",
     "sym": "ETH", "side": 1, "entry": 2664.24, "sl": 2638, "tp": 2723,
-    "margin": 134.49, "lev": 20, "qty": 0.998,
+    "margin": 134.49, "lev": 20, "qty": 0.998, "exit": 2723.25, "pnlReal": 57.1066, "closedAt": 1791174199, "outcome": "TP",
     "note": "Operación real de Luis en Bitunix (captura 2026-10-03): ETHUSDT largo x20, aislado"
   },
   {
     "id": "manual-cbrs-20261003",
     "sym": "CBRS", "side": 1, "entry": 167.34, "sl": 170, "sl0": 125.505, "tp": 210,
-    "margin": 225.11, "lev": 5, "qty": 6.72,
+    "margin": 225.11, "lev": 5, "qty": 6.72, "exit": 175.60, "pnlReal": 53.7099, "closedAt": 1791174178, "outcome": "cierre manual",
     "note": "Operación real de Luis en Bitunix (captura 2026-10-03): CBRSUSDT largo x5, aislado; SL inicial 25% bajo la entrada (125,505), movido después a 170 (por encima de la entrada)"
   }
 ]

@@ -115,11 +115,12 @@ function Analyze-TF($cd, $tfLabel, $fibLb) {
     $ph = @($piv | Where-Object { $_.t -eq 'H' }); $pl = @($piv | Where-Object { $_.t -eq 'L' })
     $o = @{ tf = $tfLabel; px = $px; atr = $atr; lines = @(); res = @(); sup = @(); patterns = @(); fib = $null; boll = $null }
     # estructura
-    $st = "sin estructura clara"
+    $st = "sin estructura clara"; $sstate = "flat"; $bos = $null
     if ($ph.Count -ge 2 -and $pl.Count -ge 2) {
         $hiUp = $ph[-1].p -gt $ph[-2].p; $loUp = $pl[-1].p -gt $pl[-2].p
         $st = if ($hiUp -and $loUp) { "máximos y mínimos crecientes (alcista)" } elseif (-not $hiUp -and -not $loUp) { "máximos y mínimos decrecientes (bajista)" } elseif ($hiUp -and -not $loUp) { "máximos crecientes pero mínimos decrecientes (expansión/transición)" } else { "máximos decrecientes con mínimos crecientes (compresión)" }
-        if ($px -gt $ph[-1].p) { $st += " · ruptura de estructura al alza" } elseif ($px -lt $pl[-1].p) { $st += " · ruptura de estructura a la baja" }
+        $sstate = if ($hiUp -and $loUp) { "up" } elseif (-not $hiUp -and -not $loUp) { "down" } else { "flat" }
+        if ($px -gt $ph[-1].p) { $st += " · ruptura de estructura al alza"; $bos = "up" } elseif ($px -lt $pl[-1].p) { $st += " · ruptura de estructura a la baja"; $bos = "down" }
     }
     $adx = TaAdx $h $l $c 14
     $fuerza = if ($adx.adx -ge 30) { "tendencia fuerte" } elseif ($adx.adx -ge 20) { "tendencia moderada" } else { "sin tendencia (rango)" }
@@ -133,7 +134,7 @@ function Analyze-TF($cd, $tfLabel, $fibLb) {
     $e12 = TaEma $c 12; $e26 = TaEma $c 26; $macd = @(); for ($i = 0; $i -lt $c.Count; $i++) { $macd += ($e12[$i] - $e26[$i]) }; $sig = TaEma $macd 9
     $hist = @(); for ($i = 0; $i -lt $c.Count; $i++) { $hist += ($macd[$i] - $sig[$i]) }
     $cross = ""; for ($j = 1; $j -le 6; $j++) { $a = $hist[-$j]; $b = $hist[-$j - 1]; if ($a -gt 0 -and $b -le 0) { $cross = "cruce alcista hace $($j - 1) vela(s)"; break } elseif ($a -lt 0 -and $b -ge 0) { $cross = "cruce bajista hace $($j - 1) vela(s)"; break } }
-    $rs = TaRsi $c 14; $rsiV = $rs[-1]
+    $rs = TaRsi $c 14; $rsiV = $rs[-1]; $obvState = $null
     $div = ""
     if ($pl.Count -ge 2 -and ($c.Count - $pl[-1].i) -le 40) { $a = $pl[-2]; $b = $pl[-1]; if ($b.p -lt $a.p -and $rs[$b.i] -gt $rs[$a.i] + 2) { $div = " · divergencia ALCISTA RSI (precio hace mínimo más bajo, RSI más alto)" } }
     if ($ph.Count -ge 2 -and ($c.Count - $ph[-1].i) -le 40) { $a = $ph[-2]; $b = $ph[-1]; if ($b.p -gt $a.p -and $rs[$b.i] -lt $rs[$a.i] - 2) { $div = " · divergencia BAJISTA RSI (precio hace máximo más alto, RSI más bajo)" } }
@@ -141,7 +142,7 @@ function Analyze-TF($cd, $tfLabel, $fibLb) {
     # OBV
     if (($cd.v | Measure-Object -Maximum).Maximum -gt 1) {
         $obv = @(0.0); for ($i = 1; $i -lt $c.Count; $i++) { $obv += $obv[-1] + $(if ($c[$i] -gt $c[$i - 1]) { $cd.v[$i] } elseif ($c[$i] -lt $c[$i - 1]) { -$cd.v[$i] } else { 0.0 }) }
-        $kk = 20; $pUp = $c[-1] -gt $c[-1 - $kk]; $oUp = $obv[-1] -gt $obv[-1 - $kk]
+        $kk = 20; $pUp = $c[-1] -gt $c[-1 - $kk]; $oUp = $obv[-1] -gt $obv[-1 - $kk]; $obvState = $(if ($pUp -eq $oUp) { "confirma" } elseif ($pUp) { "div-bajista" } else { "div-alcista" })
         $o.lines += ("   Volumen (OBV, {0} velas): {1}" -f $kk, $(if ($pUp -eq $oUp) { "acompaña al precio (confirma el movimiento)" } elseif ($pUp) { "DIVERGENCIA bajista: el precio sube y el volumen neto cae" } else { "DIVERGENCIA alcista: el precio baja y el volumen neto sube" }))
     }
     # Fibonacci
@@ -162,6 +163,31 @@ function Analyze-TF($cd, $tfLabel, $fibLb) {
     $o.res = @($cls | Where-Object { $_.p -gt $px } | Sort-Object { $_.p } | Select-Object -First 3); $o.sup = @($cls | Where-Object { $_.p -lt $px } | Sort-Object { $_.p } -Descending | Select-Object -First 3)
     $fmtLv = { param($arr) if ($arr.Count) { ($arr | ForEach-Object { "{0} ({1} toque{2})" -f (TaFp $_.p), $_.n, $(if ($_.n -gt 1) { "s" } else { "" }) }) -join " · " } else { "ninguno cercano" } }
     $o.lines += ("   Soportes: {0} · Resistencias: {1}" -f (& $fmtLv $o.sup), (& $fmtLv $o.res))
+    # Mapa de liquidez: EQH/EQL (>=2 pivotes a menos de 0,25 ATR = stops acumulados) + estructura interna (máximos/mínimos menores) + barrido reciente a la espera de confirmación
+    $pv2 = @(TaPivots $h $l 2 | Where-Object { $_.i -ge $c.Count - 60 }); $lq = @()
+    foreach ($q in $pv2) { $placed = $false; foreach ($g in $lq) { if ($g.t -eq $q.t -and [Math]::Abs($g.p - $q.p) -le 0.25 * $atr) { $g.p = ($g.p * $g.n + $q.p) / ($g.n + 1); $g.n++; $placed = $true; break } }; if (-not $placed) { $lq += @{ p = $q.p; n = 1; t = $q.t } } }
+    $eqh = @($lq | Where-Object { $_.t -eq 'H' -and $_.n -ge 2 -and $_.p -gt $px } | Sort-Object { $_.p } | Select-Object -First 1); $eql = @($lq | Where-Object { $_.t -eq 'L' -and $_.n -ge 2 -and $_.p -lt $px } | Sort-Object { $_.p } -Descending | Select-Object -First 1)
+    $inH = @($lq | Where-Object { $_.t -eq 'H' -and $_.n -eq 1 -and $_.p -gt $px } | Sort-Object { $_.p } | Select-Object -First 1); $inL = @($lq | Where-Object { $_.t -eq 'L' -and $_.n -eq 1 -and $_.p -lt $px } | Sort-Object { $_.p } -Descending | Select-Object -First 1)
+    $liqTxt = @()
+    if ($eqh) { $liqTxt += ("EQH {0} ({1} toques, {2:+0.0;-0.0}%: stops de cortos por encima)" -f (TaFp $eqh[0].p), $eqh[0].n, (($eqh[0].p / $px - 1) * 100)) }
+    if ($eql) { $liqTxt += ("EQL {0} ({1} toques, {2:+0.0;-0.0}%: stops de largos por debajo)" -f (TaFp $eql[0].p), $eql[0].n, (($eql[0].p / $px - 1) * 100)) }
+    if ($inH -or $inL) { $liqTxt += ("estructura interna: " + $(if ($inH) { "máx. " + (TaFp $inH[0].p) } else { "" }) + $(if ($inH -and $inL) { " / " } else { "" }) + $(if ($inL) { "mín. " + (TaFp $inL[0].p) } else { "" })) }
+    $o.liq = @(); $o.liq += $(if ($liqTxt.Count) { "   Liquidez: " + ($liqTxt -join " · ") } else { "   Liquidez: sin máximos/mínimos iguales claros cerca del precio." })
+    $n2 = $c.Count; $sw = $null
+    for ($m = $n2 - 1; $m -ge $n2 - 3 -and -not $sw; $m--) {
+        if ($m - 31 -lt 0) { break }; $win = ($m - 30)..($m - 1); $pHm = ($win | ForEach-Object { $h[$_] } | Measure-Object -Maximum).Maximum; $pLm = ($win | ForEach-Object { $l[$_] } | Measure-Object -Minimum).Minimum
+        $rgm = $h[$m] - $l[$m]; if ($rgm -le 0) { continue }; $age = $n2 - 1 - $m
+        $touchH = @($win | Where-Object { $h[$_] -ge $pHm - 0.25 * $atr }).Count; $touchL = @($win | Where-Object { $l[$_] -le $pLm + 0.25 * $atr }).Count
+        if ($h[$m] -gt $pHm + 0.05 * $atr -and $h[$m] -le $pHm + 1.5 * $atr -and $c[$m] -lt $pHm -and ($h[$m] - [Math]::Max($cd.o[$m], $c[$m])) / $rgm -ge 0.5) {
+            $edge = [Math]::Min($cd.o[$m], $c[$m]); $conf = $false; for ($z = $m + 1; $z -lt $n2; $z++) { if ($c[$z] -lt $edge) { $conf = $true } }
+            $sw = "⚠️ BARRIDO de máximos en {0} hace {1} vela(s) (rompió {2}{3}); {4}" -f $tfLabel, $age, (TaFp $pHm), $(if ($touchH -ge 2) { ", $touchH toques = liquidez igual" } else { "" }), $(if ($conf) { "CONFIRMADO: cerró por debajo de " + (TaFp $edge) + " → posible búsqueda del extremo opuesto " + (TaFp $pLm) + " (invalidado si supera " + (TaFp $h[$m]) + ")" } else { "aún SIN confirmar: no anticiparse; confirma un cierre por debajo de " + (TaFp $edge) + " (invalidado si supera " + (TaFp $h[$m]) + ")" })
+        } elseif ($l[$m] -lt $pLm - 0.05 * $atr -and $l[$m] -ge $pLm - 1.5 * $atr -and $c[$m] -gt $pLm -and ([Math]::Min($cd.o[$m], $c[$m]) - $l[$m]) / $rgm -ge 0.5) {
+            $edge = [Math]::Max($cd.o[$m], $c[$m]); $conf = $false; for ($z = $m + 1; $z -lt $n2; $z++) { if ($c[$z] -gt $edge) { $conf = $true } }
+            $sw = "⚠️ BARRIDO de mínimos en {0} hace {1} vela(s) (rompió {2}{3}); {4}" -f $tfLabel, $age, (TaFp $pLm), $(if ($touchL -ge 2) { ", $touchL toques = liquidez igual" } else { "" }), $(if ($conf) { "CONFIRMADO: cerró por encima de " + (TaFp $edge) + " → posible búsqueda del extremo opuesto " + (TaFp $pHm) + " (invalidado si pierde " + (TaFp $l[$m]) + ")" } else { "aún SIN confirmar: no anticiparse; confirma un cierre por encima de " + (TaFp $edge) + " (invalidado si pierde " + (TaFp $l[$m]) + ")" })
+        }
+    }
+    if ($sw) { $o.liq += "   $sw" }
+    $o.lines += $o.liq
     # Patrones de charting (heurísticas)
     $pat = @(); $recH = @($ph | Select-Object -Last 4); $recL = @($pl | Select-Object -Last 4)
     if ($ph.Count -ge 2) { $a = $ph[-2]; $b = $ph[-1]; $between = @($pl | Where-Object { $_.i -gt $a.i -and $_.i -lt $b.i }); if ([Math]::Abs($a.p - $b.p) / $a.p -le 0.012 -and ($b.i - $a.i) -ge 5 -and $between.Count) { $nk = (($between | ForEach-Object { $_.p }) | Measure-Object -Minimum).Minimum; $pat += $(if ($px -lt $nk) { "doble techo CONFIRMADO (rompió el cuello {0}; objetivo teórico ≈ {1})" -f (TaFp $nk), (TaFp ($nk - ($a.p - $nk))) } else { "posible doble techo en {0}-{1} (se confirma al perder {2})" -f (TaFp $a.p), (TaFp $b.p), (TaFp $nk) }) } }
@@ -181,6 +207,7 @@ function Analyze-TF($cd, $tfLabel, $fibLb) {
         if ($name) { $pat += $name }
     }
     $o.patterns = $pat
+    $o.m = @{ struct = $sstate; bos = $bos; adx = $adx.adx; pdi = $adx.pdi; mdi = $adx.mdi; macd = $hist[-1]; macdUp = ($hist[-1] -gt $hist[-2]); rsi = $rsiV; pctB = $pb; bandPos = $bpos; widthPctile = $bb.widthPctile; obv = $obvState; sweep = $sw; div = $div; ema21 = (TaEma $c 21)[-1] }
     $o.lines += $(if ($pat.Count) { "   Charting (heurística automática; confirmar en el gráfico): " + ($pat -join " | ") } else { "   Charting: sin patrón clásico claro en las últimas velas." })
     return $o
 }
@@ -218,6 +245,35 @@ function Get-TvLines($tv, [switch]$Short) {
     } else { TaMark $false "TradingView"; $L += "📺 TradingView: no he podido leer su resumen técnico ahora (su endpoint público no respondió o no cubre este valor)." }
     $L += "   Gráfico en TradingView: $($tv.link)"
     return $L
+}
+
+# ---------- Checklist de contexto (principios del usuario): estructura superior, zoom out, base de acumulación, volumen no extremo ----------
+# Es INFORMATIVO: en el backtest (98 series) estas condiciones mejoraron la constancia en 4h, pero con muestras pequeñas; se guarda cada resultado para validarlo con señales reales.
+function Get-ContextChecklist($sym, $tf, [int]$sg, [double]$entry, [double]$risk, [bool]$baseOk, [double]$ratio) {
+    $htf = if ($tf -eq '4h') { '1d' } else { '4h' }; $L = @(); $flags = @{ E = $null; Z = $null; B = $baseOk; V = ($ratio -lt 5) }; $score = 0; $total = 4
+    $cdH = Get-BitunixCd $sym $htf
+    if ($cdH) {
+        $piv = TaPivots $cdH.h $cdH.l 3; $ph = @($piv | Where-Object { $_.t -eq 'H' }); $pl = @($piv | Where-Object { $_.t -eq 'L' })
+        if ($ph.Count -ge 2 -and $pl.Count -ge 2) {
+            $hu = $ph[-1].p -gt $ph[-2].p; $lu = $pl[-1].p -gt $pl[-2].p; $stt = if ($hu -and $lu) { "up" } elseif (-not $hu -and -not $lu) { "down" } else { "flat" }
+            $counter = ($sg -eq 1 -and $stt -eq 'down') -or ($sg -eq -1 -and $stt -eq 'up'); $flags.E = (-not $counter)
+            $stTxt = switch ($stt) { "up" { "máximos y mínimos crecientes" } "down" { "máximos y mínimos decrecientes" } default { "estructura mixta/lateral" } }
+            $L += $(if ($counter) { "   ⚠️ Estructura $htf EN CONTRA ($stTxt): operar contra la temporalidad mayor reduce la probabilidad" } else { "   ✅ Estructura $htf sin contra ($stTxt)" })
+        } else { $L += "   · Estructura ${htf}: sin pivotes suficientes para valorarla" }
+        $aH = Analyze-TF $cdH $htf 100
+        if ($aH -and $risk -gt 0) {
+            $ob = if ($sg -eq 1) { @($aH.res | Where-Object { $_.p -gt $entry } | Sort-Object { $_.p } | Select-Object -First 1) } else { @($aH.sup | Where-Object { $_.p -lt $entry } | Sort-Object { $_.p } -Descending | Select-Object -First 1) }
+            if ($ob) { $room = [Math]::Abs($ob[0].p - $entry) / $risk; $flags.Z = ($room -ge 2); $L += $(if ($room -ge 2) { "   ✅ Zoom out: el primer obstáculo en $htf ({0}) está a {1:N1}R, hay espacio para TP2" -f (TaFp $ob[0].p), $room } else { "   ⚠️ Zoom out: hay un obstáculo en $htf ({0}) a solo {1:N1}R de la entrada; el recorrido hacia TP2 queda cortado" -f (TaFp $ob[0].p), $room }) }
+            else { $flags.Z = $true; $L += "   ✅ Zoom out: sin obstáculos relevantes en $htf por delante" }
+        }
+    } else { $L += "   · Zoom out ${htf}: sin velas para valorarlo" }
+    $L += $(if ($baseOk) { "   ✅ Acumulación previa: venía de una base lateral estrecha (la ruptura sale de una compresión)" } else { "   · Sin base lateral estrecha previa (la ruptura no sale de una acumulación clara)" })
+    $L += $(if ($ratio -lt 5) { "   ✅ Volumen de ruptura x{0:N1}: fuerte pero no extremo" -f $ratio } else { "   ⚠️ Volumen extremo x{0:N1}: puede indicar clímax o distribución" -f $ratio })
+    foreach ($k in 'E', 'Z', 'B', 'V') { if ($flags[$k] -eq $true) { $score++ } }
+    $tot = 4; if ($null -eq $flags.E) { $tot-- }; if ($null -eq $flags.Z) { $tot-- }
+    $code = ($flags.GetEnumerator() | Sort-Object Name | ForEach-Object { "{0}{1}" -f $_.Name, $(if ($_.Value -eq $true) { 1 } elseif ($_.Value -eq $false) { 0 } else { "x" }) }) -join ""
+    $head = "🧭 CONTEXTO (principios de la estrategia): {0}/{1} condiciones a favor" -f $score, $tot
+    return @{ lines = (@($head) + $L + @("   (Informativo: en el backtest estas condiciones mejoraron la constancia en 4h, pero con muestras pequeñas; se registra cada resultado para comprobarlo con señales reales.)")); score = $score; total = $tot; code = $code }
 }
 
 # ---------- Secciones ----------

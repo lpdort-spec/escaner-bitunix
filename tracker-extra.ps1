@@ -14,7 +14,7 @@ function Get-ReportState($key) {
 }
 function Set-ReportState($key, $value) {
     $f = Join-Path $PSScriptRoot "last-report.txt"; $lines = @()
-    if (Test-Path $f) { $lines = @(Get-Content $f -Encoding UTF8 | Where-Object { $_ -match '^(daily|weekly)=' -and $_ -notmatch ('^' + [regex]::Escape($key) + '=') }) }
+    if (Test-Path $f) { $lines = @(Get-Content $f -Encoding UTF8 | Where-Object { $_ -match '^(daily|weekly|mercado|mercadook)=' -and $_ -notmatch ('^' + [regex]::Escape($key) + '=') }) }
     $lines += "$key=$value"
     Set-Content $f $lines -Encoding UTF8
 }
@@ -55,6 +55,17 @@ function Import-ManualTrades($file) {
     foreach ($m in $list) {
         if (-not $m.id) { continue }
         if ($m.id -in $have) {
+            if ($m.exit) {      # cierre real comunicado por el usuario (captura de Bitunix): se registra una sola vez
+                $sigs = @(Read-Signals); $ex = $sigs | Where-Object { $_.id -eq $m.id -and $_.status -eq 'open' } | Select-Object -First 1
+                if ($ex) {
+                    $sg0 = [int]$ex.side; $px0 = [double]$m.exit; $q0 = [double]$ex.qty
+                    $ex.status = 'closed'; $ex.exit = $px0; $ex.outcome = $(if ($m.outcome) { "$($m.outcome)" } else { 'cierre manual' }); $ex.closeNote = 'cerrada a mano por el usuario'
+                    $ex.R = $sg0 * ($px0 - [double]$ex.entry) / [double]$ex.riskAbs
+                    $ex.pnlUsd = $(if ($m.pnlReal) { [double]$m.pnlReal } else { [Math]::Round($sg0 * ($px0 - [double]$ex.entry) * $q0 - $q0 * [double]$ex.entry * $script:CostRT, 2) })
+                    $ex.net = [double]$ex.R - $script:CostRT / ([double]$ex.slPct / 100); $ex.closedAt = $(if ($m.closedAt) { [long]$m.closedAt } else { [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() })
+                    Save-Signals $sigs; Write-Host ("Cierre real registrado: {0} a {1}" -f $m.id, $px0) -ForegroundColor Cyan
+                }
+            }
             # ya importada: si el fichero trae un SL inicial distinto, se corrige la R de referencia (solo mientras sigue abierta)
             if ($m.sl0) {
                 $sigs = @(Read-Signals); $ex = $sigs | Where-Object { $_.id -eq $m.id -and $_.status -eq 'open' } | Select-Object -First 1
@@ -108,9 +119,55 @@ function Get-ManualSection {
     return $L
 }
 
+# ---------- Estrategia en observación: barrido de liquidez en 4h (seguimiento en silencio, sin enviar señales) ----------
+function Get-ObsSection {
+    $o = @(Read-Signals | Where-Object { $_.strat -eq 'barrido-obs' })
+    $L = @("", "🧪 ESTRATEGIA EN OBSERVACIÓN · barrido de liquidez en 4h (NO se envían señales: se sigue en silencio para validarla con datos reales)")
+    if ($o.Count -eq 0) { $L += "• Aún no ha aparecido ningún setup. Criterios fijados de antemano: liquidez igual (EQH/EQL con ≥2 toques) → barrido → confirmación (la vela siguiente cierra más allá del cuerpo de la vela de barrido) → entrada; SL detrás del extremo del barrido; objetivo en la liquidez opuesta (R:B ≥1,5); tendencia diaria sin contra."; return $L }
+    $cl = @($o | Where-Object { $_.status -eq 'closed' }); $op = @($o | Where-Object { $_.status -eq 'open' }).Count
+    $L += ("• Setups registrados: {0} · cerrados: {1} · abiertos: {2}" -f $o.Count, $cl.Count, $op)
+    if ($cl.Count) {
+        $w = @($cl | Where-Object { [double]$_.net -gt 0 }).Count; $ex = ($cl | Measure-Object net -Average).Average
+        $L += ("• Resultado: {0}/{1} ganadores ({2:N0}%) · esperanza {3:+0.00;-0.00}R por operación (neta de comisiones del 0,15%)" -f $w, $cl.Count, (100.0 * $w / $cl.Count), $ex)
+    }
+    $L += $(if ($cl.Count -lt 30) { "• Muestra insuficiente (n={0}): hacen falta al menos 30-60 operaciones cerradas con esperanza positiva sostenida antes de plantearse enviarla como señal. El backtest (4h) dio +0,2R ± 0,3R: un indicio, no una prueba." -f $cl.Count } else { "• Con n={0} ya se puede valorar; la decisión de activarla la tomamos Luis y yo con estos datos." -f $cl.Count })
+    return $L
+}
+
+# ---------- Señales de MERCADO (acciones/ETFs, velas diarias) para el grupo Alertas Mercados: su seguimiento se informa solo en privado ----------
+function Get-MarketSection {
+    $o = @(Read-Signals | Where-Object { $_.strat -eq 'ruptura-mercado' })
+    $L = @("", "🌍 SEÑALES DE MERCADO (grupo Alertas Mercados: acciones y ETFs, velas diarias)")
+    if ($o.Count -eq 0) { $L += "• Aún no se ha emitido ninguna señal de mercado (se escanea cada día laborable a partir de las 22:30 hora de España)."; return $L }
+    $cl = @($o | Where-Object { $_.status -eq 'closed' }); $op = @($o | Where-Object { $_.status -in 'open', 'pending' }).Count; $un = @($o | Where-Object { $_.status -eq 'unfilled' }).Count
+    $L += ("• Emitidas: {0} · cerradas: {1} · abiertas/pendientes: {2} · sin ejecutar: {3}" -f $o.Count, $cl.Count, $op, $un)
+    if ($cl.Count) {
+        $tp1 = @($cl | Where-Object { $_.outcome -in 'TP1 + BE', 'TP2 + BE', 'TP3' }).Count; $ex = ($cl | Measure-Object net -Average).Average
+        $L += ("• Cerradas: llegan a TP1 {0:N0}% · esperanza {1:+0.00;-0.00}R (neta de comisiones del 0,10%). Referencia del backtest (348 activos, 10 años): ≈63% a TP1 y ≈ +0,29R (≈ +0,12R en el último 40%)." -f (100.0 * $tp1 / $cl.Count), $ex)
+    }
+    $L += $(if ($cl.Count -lt 30) { "• Muestra insuficiente (n={0}): no se puede concluir nada todavía; el backtest es solo una referencia." -f $cl.Count } else { "• Con n={0} ya se puede comparar con el backtest." -f $cl.Count })
+    return $L
+}
+
+# ---------- Disciplina: racha y pérdida acumulada de la semana (aviso, nunca una orden) ----------
+function Get-DisciplineLines {
+    $cl = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' -and $_.status -eq 'closed' -and $_.closedAt } | Sort-Object { [long]$_.closedAt })
+    $L = @("", "🛡️ DISCIPLINA Y RIESGO")
+    if ($cl.Count -eq 0) { $L += "• Aún no hay señales cerradas. Recuerda el plan: cada operación debe acabar en pequeño beneficio, gran beneficio, pequeña pérdida o breakeven; nunca en una gran pérdida (SL siempre puesto en Bitunix y ≤35% del margen)."; return $L }
+    $streak = 0; $dirWin = $null
+    for ($i = $cl.Count - 1; $i -ge 0; $i--) { $w = ([double]$cl[$i].net -gt 0); if ($null -eq $dirWin) { $dirWin = $w }; if ($w -eq $dirWin) { $streak++ } else { break } }
+    $now = Get-MadridNow; $monday = $now.Date.AddDays(-(([int]$now.DayOfWeek + 6) % 7)); $mondayUtc = [DateTimeOffset]::new($monday, [TimeZoneInfo]::FindSystemTimeZoneById("Romance Standard Time").GetUtcOffset($monday)).ToUnixTimeSeconds()
+    $wk = @($cl | Where-Object { [long]$_.closedAt -ge $mondayUtc }); $wkR = if ($wk.Count) { ($wk | Measure-Object net -Sum).Sum } else { 0.0 }
+    $L += ("• Racha actual: {0} {1} seguida(s) · esta semana: {2} operaciones cerradas, {3:+0.00;-0.00}R acumulados" -f $streak, $(if ($dirWin) { "ganadora(s)" } else { "perdedora(s)" }), $wk.Count, $wkR)
+    if (-not $dirWin -and $streak -ge 3) { $L += "• 🛑 $streak pérdidas seguidas: en el backtest la racha máxima normal era de 3-4. Haz una pausa de revisión; NO aumentes el margen para recuperar." }
+    elseif ($dirWin -and $streak -ge 3) { $L += "• ⚠️ $streak ganadoras seguidas: es cuando aparece la euforia. No relajes las reglas ni subas el margen; el mercado no debe nada. Valora asegurar beneficios y seguir con el mismo tamaño." }
+    if ($wkR -le -3) { $L += ("• 🛑 Pérdida acumulada de la semana: {0:N1}R. Plan prudente: reducir tamaño o parar hasta el lunes y revisar con calma." -f $wkR) }
+    $L += "• Recordatorio: ninguna operación debería acabar en una gran pérdida; SL siempre puesto en Bitunix, parcial en TP1 y SL a la entrada tras TP1."
+    return $L
+}
 # ---------- Informe diario sencillo ----------
 function Get-DailyReport {
-    $now = Get-MadridNow; $all = @(Read-Signals); $auto = @($all | Where-Object { $_.manual -ne $true })
+    $now = Get-MadridNow; $all = @(Read-Signals); $auto = @($all | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' })
     $since = [DateTimeOffset]::UtcNow.AddHours(-24).ToUnixTimeSeconds()
     $new = @($auto | Where-Object { [long]$_.time -ge $since }).Count
     $clNew = @($auto | Where-Object { $_.status -eq 'closed' -and $_.closedAt -and [long]$_.closedAt -ge $since }).Count
@@ -119,6 +176,9 @@ function Get-DailyReport {
     $L += ""
     $L += (Get-Report)
     $L += (Get-ManualSection)
+    try { $L += (Get-DisciplineLines) } catch {}
+    try { $L += (Get-ObsSection) } catch {}
+    try { $L += (Get-MarketSection) } catch {}
     $L += ""; $L += "Resultados descontando comisiones. Comando para pedirlo cuando quieras: /resultados"
     return ($L -join "`n")
 }

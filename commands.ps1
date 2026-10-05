@@ -166,6 +166,8 @@ $script:HelpText = @"
 /precio SIMBOLO · precio rápido
 /riesgo PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · analiza el riesgo/beneficio de tu operación (R:B, acierto mínimo, comisiones, liquidación, estado actual) y su lectura técnica (soportes/resistencias, Fibonacci, TradingView)
    Ejemplo: /riesgo ETH LARGO 2664.24 2638 2723 135 20
+/momento SIMBOLO [largo|corto] · ¿es buen momento para abrir una operación en ese activo (acción, ETF, cripto...)? Puntúa largo y corto con reglas fijas y propone un plan orientativo
+   Ejemplos: /momento AAPL · /momento BTC · /momento SAN.MC corto
 /ayuda · esta ayuda
 /id · muestra el identificador del chat
 
@@ -284,16 +286,23 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
         $script:LastCmd[$key] = Get-Date
         switch ($cmd) {
             { $_ -in "/ayuda", "/start", "/help" } {
-                $h = $script:HelpText; if (-not $script:PrivateChats -or $chat -in $script:PrivateChats) { $h = $h.Replace("/ayuda · esta ayuda", "/resultados · informe diario sencillo (señales + tus operaciones manuales); también llega solo cada día a las 22:00 (hora de España)`n/semanal · informe semanal profundo con análisis de los fallos; también llega solo los domingos a las 22:00`n/operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · registra una operación tuya en el seguimiento`n/cerrar PAR PRECIO · registra el cierre manual de una operación tuya`n(estos 4 comandos solo funcionan en este chat privado)`n/ayuda · esta ayuda") }
+                $h = $script:HelpText; if (-not $script:PrivateChats -or $chat -in $script:PrivateChats) { $h = $h.Replace("/ayuda · esta ayuda", "/resultados · informe diario sencillo (señales + tus operaciones manuales); también llega solo cada día a las 22:00 (hora de España)`n/semanal · informe semanal profundo con análisis de los fallos; también llega solo los domingos a las 22:00`n/operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · registra una operación tuya en el seguimiento`n/mercado · prueba en seco del escáner de acciones/ETFs (no envía nada al grupo)`n/cerrar PAR PRECIO · registra el cierre manual de una operación tuya`n(estos 4 comandos solo funcionan en este chat privado)`n/ayuda · esta ayuda") }
                 Send-Tg $token $chat $h $m.message_id
             }
-            { $_ -in "/resultados", "/semanal", "/operacion", "/cerrar" } {
+            { $_ -in "/resultados", "/semanal", "/operacion", "/cerrar", "/mercado" } {
                 if ($script:PrivateChats -and $chat -notin $script:PrivateChats) { Send-Tg $token $chat "Este comando solo está disponible en el chat privado de Luis. Aquí puedes usar /informe, /precio y /riesgo." $m.message_id; break }
                 switch ($cmd) {
                     "/resultados" { $rep = try { if (Get-Command Get-DailyReport -ErrorAction SilentlyContinue) { Get-DailyReport } else { Get-Report } } catch { "Aún no hay resultados registrados." }; Send-Tg $token $chat $rep $m.message_id }
                     "/semanal" {
                         Send-Tg $token $chat "⏳ Preparando el informe semanal profundo (puede tardar un minuto)..." $m.message_id
                         $rep = try { Get-WeeklyDeepReport } catch { "No he podido generar el informe semanal ahora: $($_.Exception.Message)" }; Send-Tg $token $chat $rep $null
+                    }
+                    "/mercado" {
+                        if (-not (Get-Command Scan-Market -ErrorAction SilentlyContinue)) { Send-Tg $token $chat "El escáner de mercado no está disponible en este entorno." $m.message_id; break }
+                        Send-Tg $token $chat "⏳ Prueba en seco del escáner de mercado (velas diarias, ~350 activos): puede tardar 2-3 minutos. NADA se envía al grupo ni se registra." $m.message_id
+                        $script:MktDryOut = @(); $nF = 0; try { $nF = Scan-Market -Dry } catch { Send-Tg $token $chat "Fallo en la prueba: $($_.Exception.Message)" $null }
+                        if ($script:MktDryOut.Count -eq 0) { Send-Tg $token $chat "🧪 Ahora mismo ningún activo cumple todas las reglas en la última sesión cerrada (es lo habitual: la táctica es exigente y no fuerza operaciones)." $null }
+                        foreach ($d in $script:MktDryOut) { Send-Tg $token $chat ("🧪 PRUEBA (no enviada al grupo)`n`n" + $d[1]) $null }
                     }
                     "/operacion" { Send-Tg $token $chat (Register-ManualFromArgs $args1) $m.message_id }
                     "/cerrar" { Send-Tg $token $chat (Close-ManualFromArgs $args1) $m.message_id }
@@ -310,6 +319,14 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
                 }
                 Send-Tg $token $chat $out $m.message_id
             }
+            "/momento" {
+                if (-not $args1) { Send-Tg $token $chat "Uso: /momento SIMBOLO [largo|corto]`nEjemplos: /momento AAPL · /momento BTC · /momento SAN.MC corto`nTe digo, con reglas fijas y visibles, si es buen momento para abrir un largo o un corto en ese activo." $m.message_id; break }
+                $mode = ""; $side = ""
+                foreach ($w in @($args1 | Select-Object -Skip 1)) { $w1 = $w.ToLower(); if ($w1 -in 'largo', 'long', 'compra') { $side = 'largo' } elseif ($w1 -in 'corto', 'short', 'venta') { $side = 'corto' } elseif ($w1 -in 'accion', 'acción', 'bolsa', 'stock') { $mode = 'accion' } elseif ($w1 -in 'cripto', 'crypto') { $mode = 'cripto' } }
+                Send-Tg $token $chat "⏳ Analizando el momento de $($args1[0].ToUpper())..." $m.message_id
+                $rep = try { Get-MomentoReport $args1[0] $mode $side } catch { "No he podido completar el análisis ahora: $($_.Exception.Message)" }
+                Send-Tg $token $chat $rep $null
+            }
             "/informe" {
                 if (-not $args1) { Send-Tg $token $chat "Uso: /informe SIMBOLO (ej. /informe BTC, /informe AAPL, /informe IREN)" $m.message_id; break }
                 $mode = ""; if ($args1.Count -gt 1) { $w = $args1[1].ToLower(); if ($w -in "accion", "acción", "bolsa", "stock") { $mode = "accion" } elseif ($w -in "cripto", "crypto") { $mode = "cripto" } }
@@ -323,4 +340,5 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
 }
 
 if (Test-Path (Join-Path $PSScriptRoot "analisis-tecnico.ps1")) { . (Join-Path $PSScriptRoot "analisis-tecnico.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "momento.ps1")) { . (Join-Path $PSScriptRoot "momento.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }

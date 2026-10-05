@@ -45,7 +45,7 @@ function Get-ContextFlags($s) {
 }
 
 function Get-WeeklyDeepReport {
-    $now = Get-MadridNow; $all = @(Read-Signals | Where-Object { $_.manual -ne $true })
+    $now = Get-MadridNow; $all = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' })
     $wkStart = [DateTimeOffset]::UtcNow.AddDays(-7).ToUnixTimeSeconds()
     $week = @($all | Where-Object { [long]$_.time -ge $wkStart })
     $wkCl = @($week | Where-Object { $_.status -eq 'closed' }); $allCl = @($all | Where-Object { $_.status -eq 'closed' })
@@ -123,6 +123,8 @@ function Get-WeeklyDeepReport {
     }
     # 6) Manuales
     $man = @(Get-ManualSection); if ($man.Count -gt 2) { $L += ""; $L += "6️⃣ TUS OPERACIONES MANUALES (resultado en USDT; comisiones estimadas al 0,10%)"; $L += @($man | Select-Object -Skip 2) }
+    try { $obs = @(Get-ObsSection); if ($obs.Count) { $L += $obs } } catch {}
+    try { $mk = @(Get-MarketSection); if ($mk.Count) { $L += $mk } } catch {}
     # 7) Hipótesis y estado
     $L += ""; $L += "7️⃣ HIPÓTESIS DE MEJORA (no se aplican solas)"
     if ($allCl.Count -lt 20) { $L += "• Sin cambios recomendados: con menos de 20 operaciones cerradas cualquier ajuste sería ajustar al ruido. Se mantiene el método y se sigue acumulando datos." }

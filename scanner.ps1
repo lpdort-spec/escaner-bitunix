@@ -37,12 +37,17 @@ if (Test-Path (Join-Path $PSScriptRoot "informe-semanal.ps1")) { . (Join-Path $P
 if (Test-Path (Join-Path $PSScriptRoot "analisis-tecnico.ps1")) { . (Join-Path $PSScriptRoot "analisis-tecnico.ps1") }
 $hasCmds = $false
 if (Test-Path (Join-Path $PSScriptRoot "commands.ps1")) { . (Join-Path $PSScriptRoot "commands.ps1"); $hasCmds = $true }
+if (Test-Path (Join-Path $PSScriptRoot "scanner-mercado.ps1")) { . (Join-Path $PSScriptRoot "scanner-mercado.ps1") }
 $TelegramSignalChatId = $env:TELEGRAM_SIGNAL_CHAT_ID
 if (-not $TelegramSignalChatId -and (Test-Path $cfg)) { try { $TelegramSignalChatId = (Get-Content $cfg -Raw | ConvertFrom-Json).signalChatId } catch {} }
 # destinos de las señales: el secreto del chat privado; si no está configurado, SOLO chats privados (id positivo), nunca grupos (id negativo)
 $sigChats = @($(if ($TelegramSignalChatId) { $TelegramSignalChatId } else { $TelegramChatId }) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 if (-not $TelegramSignalChatId) { $priv = @($sigChats | Where-Object { $_ -notmatch '^-' }); if ($priv.Count) { $sigChats = $priv } }
 $allowedChats = @(($TelegramChatId + "," + $TelegramSignalChatId) -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)   # chats que pueden dar órdenes al bot
+# grupo "Alertas Mercados" (acciones, ETFs y cripto en formato genérico): su id no es secreto y vive en chats.json; ahí el bot atiende comandos y publica las señales de mercado
+$script:MktChat = $null; $chatsFile = Join-Path $PSScriptRoot "chats.json"
+if (Test-Path $chatsFile) { try { $script:MktChat = "$((Get-Content $chatsFile -Raw -Encoding UTF8 | ConvertFrom-Json).mercado)".Trim() } catch {} }
+if ($script:MktChat) { $allowedChats = @($allowedChats + $script:MktChat | Select-Object -Unique) }
 $offsetFile = Join-Path $PSScriptRoot "bot-offset.txt"
 $script:cmdTick = 0
 $script:PrivateChats = $sigChats     # comandos reservados (resultados, semanal, operación...) solo en el chat privado de señales
@@ -300,6 +305,14 @@ function Scan($iv) {
             if ($null -ne $book) { $ctx += ("Libro: {0:N0}% compradores / {1:N0}% vendedores" -f $book, (100 - $book)) }
             $sentTxt = Get-SentimentLine $side; if ($sentTxt) { $ctx += $sentTxt }
             $ctx += @(Get-KeyLevels $t.symbol $entry)
+            $ctxCode = $null; $ctxScore = $null
+            if (Get-Command Get-ContextChecklist -ErrorAction SilentlyContinue) {
+                try {
+                    $rangeA = ($pHigh - $pLow) / $atr; $netA = [Math]::Abs([double]$closed[$n - 2].close - [double]$closed[$n - 1 - $Lookback].close) / [Math]::Max($pHigh - $pLow, 1e-12)
+                    $chk = Get-ContextChecklist ($t.symbol -replace 'USDT$', '') $iv $sgn $entry $risk ($rangeA -le 8 -and $netA -le 0.5) $ratio
+                    $ctx += @(""; $chk.lines); $ctxCode = $chk.code; $ctxScore = $chk.score
+                } catch {}
+            }
             if (Get-Command Get-TradeTechNote -ErrorAction SilentlyContinue) { try { $ctx += @(""; Get-TradeTechNote ($t.symbol -replace 'USDT$', '') $sgn $entry $sl $tp3 -Short) } catch {} }      # charting, Fibonacci, Bollinger y TradingView (informativo)
 
             $q = 0.6
@@ -309,7 +322,8 @@ function Scan($iv) {
             if ($btcAl -eq $true) { $q += 0.05 } elseif ($btcAl -eq $false) { $q -= 0.1 }
             $q = [Math]::Max(0.3, [Math]::Min(1.0, $q))
             $cf = switch ($plan.Risk) { "BAJO" { 1.0 } "MEDIO" { 0.8 } "ALTO" { 0.55 } default { 0.35 } }
-            $margin = [Math]::Max(20, [Math]::Min($MaxMargin, [Math]::Round($MaxMargin * $q * $cf / 10) * 10))
+            $tfF = if ($iv -eq "1h") { 0.6 } else { 1.0 }                   # 1h: esperanza débil y negativa fuera de muestra en el backtest -> menos margen hasta que las señales reales la confirmen
+            $margin = [Math]::Max(20, [Math]::Min($MaxMargin, [Math]::Round($MaxMargin * $q * $cf * $tfF / 10) * 10))
             $notional = $margin * $lev
             $lossUsd = $notional * $slPct / 100
             $u1 = $lossUsd; $u2 = 2 * $lossUsd; $u3 = 3 * $lossUsd
@@ -347,6 +361,27 @@ function Scan($iv) {
                 (Fmt $tp1), $roi1, (Fmt $tp2), $roi2, (Fmt $tp3), $roi3, $tpPct, (Fmt $sl), $slPct, $roiSl, $margin, $MaxMargin, $notional,
                 $lossUsd, $u1, $u2, $u3, ($W1 * 100), ($W2 * 100), ($W3 * 100), $planGain, $feeUsd, $feeShare, $plan.Risk, $volTxt, $dr, $why, ($ctx -join "`n"), $rbTxt
 
+            # --- Versión GENÉRICA para el grupo Alertas Mercados (solo cripto en 4h, el marco validado): sin margen, apalancamiento ni cifras privadas de Luis ---
+            $genMsg = $null
+            if ($iv -eq "4h" -and $strat -eq "ruptura" -and $script:MktChat) {
+                $posEx = 10000 * 0.01 / ($slPct / 100)
+                $genMsg = (@(
+                    ("{0} {1}/USDT {2} {3}  ({4} · {5}) · cripto (futuros)" -f $icon, $name, $side, $arrow, $iv, $stratName),
+                    "",
+                    $(if ($entryType -eq "limit") { "Entrada: orden limit en {0} (válida unas {1} h; si no se ejecuta, se cancela)" -f (Fmt $entry), $valid } else { "Entrada a mercado cerca de {0}" -f (Fmt $entry) }),
+                    ("🛑 SL: {0} (-{1:N1}%)" -f (Fmt $sl), $slPct),
+                    ("🎯 TP1 (1:1): {0} · TP2 (1:2): {1} · TP3 (1:3): {2} (hasta +{3:N1}% de movimiento)" -f (Fmt $tp1), (Fmt $tp2), (Fmt $tp3), $tpPct),
+                    "Gestión: cierra un tercio en cada objetivo y mueve el SL a la entrada tras el TP1.",
+                    "",
+                    ("💰 Tamaño: arriesga como máximo el 1% de tu capital. Posición = (capital × 1%) ÷ ({0:N1}% de distancia al SL). Con 10.000 USDT de capital: posición ≈ {1:N0} USDT. Usa el apalancamiento mínimo necesario; la liquidación debe quedar mucho más lejos que el SL." -f $slPct, $posEx),
+                    ("Motivo: {0}" -f $why),
+                    ($ctx -join "`n"),
+                    "",
+                    "📊 Backtest de esta táctica en cripto 4h (98 series, ~200 días): llega a TP1 en ≈ 7 de cada 10 operaciones y da ≈ +0,4R de media por operación, con rachas de hasta 3 pérdidas. Dato histórico, no una promesa.",
+                    "⚠️ Señal automática calculada con datos públicos; no es asesoramiento financiero. Pon siempre el stop loss y no arriesgues más de lo que puedas permitirte perder."
+                ) -join "`n")
+                if ($genMsg.Length -gt 3900) { $genMsg = $genMsg.Substring(0, 3890) + "…" }
+            }
             # --- Gráfico estilo TradingView ---
             $photo = $null
             if ($hasChart) {
@@ -354,12 +389,13 @@ function Scan($iv) {
                 $photo = New-SignalChart $cs $side $entry $sl $tp1 $tp2 $tp3 ("{0}/USDT {1} · {2} · {3}" -f $name, $iv, $side, $stratName) (Join-Path ([IO.Path]::GetTempPath()) ("senal-" + $t.symbol + ".png")) $level
             }
             if (Send-Alert $key $msg $photo) {
+                if ($genMsg -and $TelegramToken) { try { Send-Tg $TelegramToken $script:MktChat $genMsg $null } catch {} }
                 Add-SignalRecord ([ordered]@{
                     id = $key; time = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); sym = $t.symbol; tf = $iv; strat = $strat; side = $sgn
                     entryType = $entryType; entry = $entry; sl = $sl; tp1 = $tp1; tp2 = $tp2; tp3 = $tp3; riskAbs = $risk; slPct = $slPct
                     lev = $lev; margin = $margin; ratio = [Math]::Round($ratio, 2); trend = $trend; aligned = $aligned; btcAligned = $btcAl
                     squeeze = $squeeze; pool = $pool; funding = $fund; book = $book; risk = $plan.Risk; roiTp2 = [Math]::Round($roi2, 1)
-                    status = $(if ($entryType -eq "limit") { "pending" } else { "open" }); stage = 0; realized = 0.0; age = 0; lastLabel = [long]$last.time; lab0 = [long]$last.time; sentiment = $script:sentCache.v; outcome = $null; R = $null; net = $null
+                    status = $(if ($entryType -eq "limit") { "pending" } else { "open" }); stage = 0; realized = 0.0; age = 0; lastLabel = [long]$last.time; lab0 = [long]$last.time; sentiment = $script:sentCache.v; ctxScore = $ctxScore; ctxFlags = $ctxCode; outcome = $null; R = $null; net = $null
                 })
             }
         } catch { }
@@ -393,12 +429,72 @@ function Send-WeeklyReport {
     Send-ToSignalChats $rep
 }
 
+# Estrategia EN OBSERVACIÓN (no envía señales): barrido de liquidez en 4h. Liquidez igual (EQH/EQL >= 2 toques) -> barrido -> confirmación (la vela siguiente cierra más allá del cuerpo)
+# -> entrada a mercado, SL detrás del extremo, objetivo en la liquidez opuesta (R:B >= 1,5), tendencia diaria (EMA21) sin contra. Criterios fijados ANTES de ver resultados reales.
+function Scan-SweepObs {
+    $iv = "4h"; $dur = 240; $look = 30; $added = 0
+    $tk = (Invoke-RestMethod "$base/tickers").data | Where-Object { $_.symbol -like "*USDT" } | Sort-Object { [double]$_.quoteVol } -Descending | Select-Object -First $TopN
+    foreach ($t in $tk) {
+        if (($script:cmdTick++ % 10) -eq 0) { Poll-Commands }
+        try {
+            $k = @((Invoke-RestMethod "$base/kline?symbol=$($t.symbol)&interval=$iv&limit=120").data | Sort-Object { [long]$_.time }); if ($k.Count -lt 70) { continue }
+            $closed = @($k[0..($k.Count - 2)]); $n = $closed.Count; $kk = $n - 1
+            $ageMin = ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - ([long]$closed[$kk].time + 2 * $dur * 60000)) / 60000; if ($ageMin -gt 1.5 * $dur) { continue }
+            foreach ($back in 1, 2) {
+                $s = $kk - $back; if ($s -lt $look + 16) { continue }
+                $pH = -1e18; $pL = 1e18; for ($q = $s - $look; $q -lt $s; $q++) { if ([double]$closed[$q].high -gt $pH) { $pH = [double]$closed[$q].high }; if ([double]$closed[$q].low -lt $pL) { $pL = [double]$closed[$q].low } }
+                $hi = [double]$closed[$s].high; $lo = [double]$closed[$s].low; $op = [double]$closed[$s].open; $cs = [double]$closed[$s].close; $rg = $hi - $lo; if ($rg -le 0) { continue }
+                $atr = Get-Atr $closed ($s - 14) ($s - 1); if ($atr -le 0) { continue }
+                $sg = 0; $ext = 0.0; $eq = 0
+                if ($hi -gt $pH + 0.05 * $atr -and $hi -le $pH + 1.5 * $atr -and $cs -lt $pH -and ($hi - [Math]::Max($op, $cs)) / $rg -ge 0.5) { $sg = -1; $ext = $hi; for ($q = $s - $look; $q -lt $s; $q++) { if ([double]$closed[$q].high -ge $pH - 0.25 * $atr) { $eq++ } } }
+                elseif ($lo -lt $pL - 0.05 * $atr -and $lo -ge $pL - 1.5 * $atr -and $cs -gt $pL -and ([Math]::Min($op, $cs) - $lo) / $rg -ge 0.5) { $sg = 1; $ext = $lo; for ($q = $s - $look; $q -lt $s; $q++) { if ([double]$closed[$q].low -le $pL + 0.25 * $atr) { $eq++ } } }
+                if ($sg -eq 0 -or $eq -lt 2) { continue }
+                $body = if ($sg -eq -1) { [Math]::Min($op, $cs) } else { [Math]::Max($op, $cs) }; $slv = $ext - $sg * 0.1 * $atr
+                $firstConf = $null; $invalid = $false
+                for ($z = $s + 1; $z -le $kk; $z++) {
+                    $zh = [double]$closed[$z].high; $zl = [double]$closed[$z].low; $zc = [double]$closed[$z].close
+                    if (($sg -eq 1 -and $zl -le $slv) -or ($sg -eq -1 -and $zh -ge $slv)) { $invalid = $true; break }
+                    if (($sg -eq 1 -and $zc -gt $body) -or ($sg -eq -1 -and $zc -lt $body)) { $firstConf = $z; break }
+                    if ($z - $s -ge 2) { break }
+                }
+                if ($invalid -or $firstConf -ne $kk) { continue }
+                $entry = [double]$closed[$kk].close; $R = $sg * ($entry - $slv); if ($R -le 0 -or $R -lt 0.4 * $atr -or $R -gt 2.5 * $atr -or ($R / $entry * 100) -lt 1.0) { continue }
+                $target = if ($sg -eq -1) { $pL } else { $pH }; if ($sg * ($target - $entry) / $R -lt 1.5) { continue }
+                $trend = Get-TrendHtf $t.symbol $iv
+                if (($sg -eq 1 -and $trend -eq "bajista") -or ($sg -eq -1 -and $trend -ne "bajista")) { continue }
+                $key = "obs-$($t.symbol)-4h-$($closed[$kk].time)"
+                if (@(Read-Signals | Where-Object { $_.id -eq $key }).Count) { continue }
+                Add-SignalRecord ([ordered]@{
+                    id = $key; time = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); sym = $t.symbol; tf = $iv; strat = "barrido-obs"; side = $sg
+                    entryType = "mercado"; entry = $entry; sl = $slv; tp1 = $target; tp2 = $target; tp3 = $target; riskAbs = $R; slPct = ($R / $entry * 100)
+                    ratio = $null; trend = $trend; aligned = $null; btcAligned = $null; pool = "EQ $eq toques"; risk = "OBS"
+                    status = "open"; stage = 0; realized = 0.0; age = 0; lastLabel = [long]$closed[$kk].time; lab0 = [long]$closed[$kk].time
+                    mode = "single"; cost = 0.0015; outcome = $null; R = $null; net = $null
+                })
+                $added++
+            }
+        } catch { }
+        Start-Sleep -Milliseconds 100
+    }
+    Write-Host ("  [observación 4h] barridos con confirmación registrados en silencio: {0}" -f $added) -ForegroundColor DarkGray
+}
+$script:obsAt = [datetime]::MinValue
+function Run-SweepObsIfDue {                       # solo cuando acaba de cerrar una vela de 4h (y como máximo cada 20 min)
+    if (((Get-Date) - $script:obsAt).TotalMinutes -lt 20) { return }
+    $script:obsAt = Get-Date
+    try { $kb = @((Invoke-RestMethod "$base/kline?symbol=BTCUSDT&interval=4h&limit=5").data | Sort-Object { [long]$_.time }); $lastB = $kb[$kb.Count - 2]
+          $ageB = ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() - ([long]$lastB.time + 2 * 240 * 60000)) / 60000; if ($ageB -gt 45) { return } } catch { return }
+    Scan-SweepObs
+}
+
 Write-Host "Buscando setups de alto potencial en top $TopN pares Bitunix ($($Interval -join ', ')) [$($Strategies -join ', ')] cada $EverySeconds s. Ctrl+C para parar." -ForegroundColor Cyan
 $script:startAt = Get-Date
 try { Import-ManualTrades (Join-Path $PSScriptRoot "operaciones-manuales.json") } catch {}      # tus operaciones reales entran en el seguimiento (solo se importan una vez)
 do {
     try { Update-Signals $base } catch {}
     foreach ($iv in $Interval) { Scan $iv }
+    try { Run-SweepObsIfDue } catch {}
+    try { Send-MarketScanIfDue } catch {}
     try { Send-DailyReport } catch {}
     try { Send-WeeklyReport } catch {}
     Write-Host ("{0} pasada completada" -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor DarkGray

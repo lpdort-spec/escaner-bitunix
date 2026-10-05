@@ -12,7 +12,7 @@ function Read-Signals {
     $recs = @(Get-Content $script:SigFile -Encoding UTF8 | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
     # PowerShell no permite asignar propiedades inexistentes en objetos de JSON: se añaden todas las que el seguimiento puede escribir
     foreach ($r0 in $recs) {
-        foreach ($p in 'note', 'closedAt', 'exit', 'pnlUsd', 'lab0', 'manual', 'mode', 'sentiment', 'qty', 'sl0', 'closeNote') {
+        foreach ($p in 'note', 'closedAt', 'exit', 'pnlUsd', 'lab0', 'manual', 'mode', 'sentiment', 'qty', 'sl0', 'closeNote', 'ctxScore', 'ctxFlags', 'cost', 'src', 'expiry') {
             if (-not ($r0.PSObject.Properties.Name -contains $p)) { $r0 | Add-Member -NotePropertyName $p -NotePropertyValue $null }
         }
     }
@@ -30,10 +30,15 @@ function Update-Signals($base) {
     $changed = $false
     foreach ($s in $sigs) {
         if ($s.status -in 'closed', 'unfilled') { continue }
-        try {
-            $k = (Invoke-RestMethod "$base/kline?symbol=$($s.sym)&interval=$($s.tf)&limit=200").data | Sort-Object { [long]$_.time }
-        } catch { continue }
-        $closed = @($k[0..($k.Count - 2)])
+        if ($s.src -eq "yahoo") {      # acciones/ETFs: velas diarias cerradas de Yahoo Finance (la etiqueta de cada vela es el inicio de su sesión)
+            if (-not (Get-Command Get-MktClosedForTracker -ErrorAction SilentlyContinue)) { continue }
+            $closed = @(Get-MktClosedForTracker $s.sym); if ($closed.Count -eq 0) { continue }
+        } else {
+            try {
+                $k = (Invoke-RestMethod "$base/kline?symbol=$($s.sym)&interval=$($s.tf)&limit=200").data | Sort-Object { [long]$_.time }
+            } catch { continue }
+            $closed = @($k[0..($k.Count - 2)])
+        }
         $sgn = [int]$s.side
         foreach ($c in $closed) {
             if ([long]$c.time -le [long]$s.lastLabel) { continue }
@@ -42,10 +47,11 @@ function Update-Signals($base) {
             $hitSL = if ($sgn -eq 1) { $lo -le $s.sl } else { $hi -ge $s.sl }
             $reachEntry = if ($sgn -eq 1) { $lo -le $s.entry } else { $hi -ge $s.entry }
             $reachTP = { param($lvl) if ($sgn -eq 1) { $hi -ge $lvl } else { $lo -le $lvl } }
-            if ($s.manual -eq $true) {      # operación manual del usuario: salida única (SL o TP), sin gestión simulada ni tiempo máximo
+            if ($s.manual -eq $true -or $s.mode -eq 'single') {      # salida única (SL o TP): operaciones manuales del usuario y estrategias en observación (sin gestión simulada)
                 $s.age = [int]$s.age + 1
                 if ($hitSL) { $s.status = 'closed'; $s.exit = [double]$s.sl; $s.outcome = $(if ($sgn * ([double]$s.sl - [double]$s.entry) -gt 0) { 'SL en beneficio' } else { 'SL' }); break }
                 if (& $reachTP $s.tp1) { $s.status = 'closed'; $s.exit = [double]$s.tp1; $s.outcome = 'TP'; break }
+                if ($s.manual -ne $true -and [int]$s.age -ge 30) { $s.status = 'closed'; $s.exit = $cl; $s.outcome = 'tiempo'; break }       # observación: sin tiempo ilimitado (30 velas, como en el backtest)
                 continue
             }
             if ($s.status -eq 'pending') {
@@ -53,7 +59,7 @@ function Update-Signals($base) {
                 if ($hitSL) { $s.status = 'unfilled'; $s.note = 'invalidada antes de entrar'; break }
                 if ($reachEntry) { $s.status = 'open'; $s.stage = 0; $s.age = 0; $s.realized = 0.0 }
                 elseif (& $reachTP $s.tp1) { $s.status = 'unfilled'; $s.note = 'se fue sin dar entrada'; break }
-                elseif ($s.age -ge 6) { $s.status = 'unfilled'; $s.note = 'orden limit no ejecutada'; break }
+                elseif ($s.age -ge $(if ($s.expiry) { [int]$s.expiry } else { 6 })) { $s.status = 'unfilled'; $s.note = 'orden limit no ejecutada'; break }
                 if ($s.status -ne 'open') { continue }
                 # la vela de entrada solo puede cerrar la operación si toca el SL
                 if ($hitSL) { $s.status = 'closed'; $s.R = -1.0; $s.outcome = 'SL'; break }
@@ -72,12 +78,12 @@ function Update-Signals($base) {
                 $s.R = [double]$s.realized + $left * [Math]::Max(-1.0, [Math]::Min(3.0, $m)); $s.status = 'closed'; $s.outcome = 'tiempo'; break
             }
         }
-        if ($s.manual -eq $true -and $s.status -eq 'closed' -and $null -eq $s.net -and $null -ne $s.exit) {
+        if (($s.manual -eq $true -or $s.mode -eq 'single') -and $s.status -eq 'closed' -and $null -eq $s.net -and $null -ne $s.exit) {
             $s.R = $sgn * ([double]$s.exit - [double]$s.entry) / [double]$s.riskAbs
-            $q = if ($s.qty) { [double]$s.qty } else { [double]$s.margin * [double]$s.lev / [double]$s.entry }
-            $s.pnlUsd = [Math]::Round($sgn * ([double]$s.exit - [double]$s.entry) * $q - $q * [double]$s.entry * $script:CostRT, 2)
+            $q = if ($s.qty) { [double]$s.qty } elseif ($s.margin -and $s.lev) { [double]$s.margin * [double]$s.lev / [double]$s.entry } else { $null }
+            if ($q) { $s.pnlUsd = [Math]::Round($sgn * ([double]$s.exit - [double]$s.entry) * $q - $q * [double]$s.entry * $script:CostRT, 2) }
         }
-        if ($s.status -eq 'closed' -and $null -eq $s.net) { $s.net = [double]$s.R - $script:CostRT / ([double]$s.slPct / 100); $s.closedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
+        if ($s.status -eq 'closed' -and $null -eq $s.net) { $cc = if ($s.cost) { [double]$s.cost } else { $script:CostRT }; $s.net = [double]$s.R - $cc / ([double]$s.slPct / 100); $s.closedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }
     }
     if ($changed) { Save-Signals $sigs }
 }
@@ -91,7 +97,7 @@ function Group-Stats($items, $label) {
 }
 
 function Get-Report {
-    $all = @(Read-Signals | Where-Object { $_.manual -ne $true })      # las operaciones manuales se informan aparte
+    $all = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' })      # manuales, observación y mercado se informan aparte
     $cl = @($all | Where-Object { $_.status -eq 'closed' })
     $open = @($all | Where-Object { $_.status -in 'open', 'pending' }).Count
     $un = @($all | Where-Object { $_.status -eq 'unfilled' }).Count
