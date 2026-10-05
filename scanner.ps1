@@ -38,6 +38,7 @@ if (Test-Path (Join-Path $PSScriptRoot "analisis-tecnico.ps1")) { . (Join-Path $
 $hasCmds = $false
 if (Test-Path (Join-Path $PSScriptRoot "commands.ps1")) { . (Join-Path $PSScriptRoot "commands.ps1"); $hasCmds = $true }
 if (Test-Path (Join-Path $PSScriptRoot "scanner-mercado.ps1")) { . (Join-Path $PSScriptRoot "scanner-mercado.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "vigilancia.ps1")) { . (Join-Path $PSScriptRoot "vigilancia.ps1") }
 $TelegramSignalChatId = $env:TELEGRAM_SIGNAL_CHAT_ID
 if (-not $TelegramSignalChatId -and (Test-Path $cfg)) { try { $TelegramSignalChatId = (Get-Content $cfg -Raw | ConvertFrom-Json).signalChatId } catch {} }
 # destinos de las señales: el secreto del chat privado; si no está configurado, SOLO chats privados (id positivo), nunca grupos (id negativo)
@@ -495,6 +496,8 @@ do {
     foreach ($iv in $Interval) { Scan $iv }
     try { Run-SweepObsIfDue } catch {}
     try { Send-MarketScanIfDue } catch {}
+    try { Send-WatchAlertsIfDue } catch {}
+    try { Send-IrenWeeklyIfDue } catch {}
     try { Send-DailyReport } catch {}
     try { Send-WeeklyReport } catch {}
     Write-Host ("{0} pasada completada" -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor DarkGray
