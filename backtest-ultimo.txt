@@ -1,0 +1,32 @@
+﻿📈 BACKTEST SEMANAL · 2026-10-05
+Datos reales de Bitunix: 98 series · historia ~100 días en 1h y ~233 días en 4h · comisiones 0,10-0,15% incluidas.
+Esperanza = ganancia media por operación en R (1R = lo que arriesgas hasta el SL), cerrando un tercio en TP1, TP2 y TP3. 'Fuera de muestra' = último 40% del tiempo.
+
+▶ ACTUAL (la que usa el bot)
+   1h: 43 operaciones · llegan a 1,5R el 44% · esperanza +0.12R · fuera de muestra +0.40R
+   4h: 63 operaciones · llegan a 1,5R el 59% · esperanza +0.52R · fuera de muestra +0.79R
+▶ volumen minimo x2.5
+   1h: 26 operaciones · llegan a 1,5R el 50% · esperanza +0.23R · fuera de muestra +0.69R
+   4h: 29 operaciones · llegan a 1,5R el 59% · esperanza +0.45R · fuera de muestra +0.38R
+▶ SL minimo 1.5%
+   1h: 13 operaciones · llegan a 1,5R el 38% · esperanza -0.06R · fuera de muestra +0.14R
+   4h: 34 operaciones · llegan a 1,5R el 59% · esperanza +0.51R · fuera de muestra +0.77R
+▶ rango de 10 velas
+   1h: 43 operaciones · llegan a 1,5R el 44% · esperanza +0.08R · fuera de muestra +0.30R
+   4h: 70 operaciones · llegan a 1,5R el 60% · esperanza +0.48R · fuera de muestra +0.55R
+▶ sin filtro de tendencia
+   1h: 67 operaciones · llegan a 1,5R el 46% · esperanza +0.15R · fuera de muestra +0.53R
+   4h: 126 operaciones · llegan a 1,5R el 50% · esperanza +0.22R · fuera de muestra +0.54R
+▶ entrada a mercado (comparacion)
+   1h: 308 operaciones · llegan a 1,5R el 33% · esperanza -0.25R · fuera de muestra -0.29R
+   4h: 216 operaciones · llegan a 1,5R el 45% · esperanza -0.01R · fuera de muestra +0.06R
+▶ barrido de liquidez (experimental)
+   1h: 115 operaciones · llegan a 1,5R el 43% · esperanza -0.01R · fuera de muestra -0.09R
+   4h: 89 operaciones · llegan a 1,5R el 40% · esperanza +0.01R · fuera de muestra 0.00R
+
+✅ VEREDICTO: la configuración actual sigue con esperanza positiva en 1h y 4h, también fuera de muestra.
+
+📊 ACIERTOS REALES DEL BOT (señales enviadas, evaluadas con las velas posteriores):
+Seguimiento: 0 señales registradas, 0 abiertas, 0 sin ejecutar. Aún no hay ninguna cerrada.
+
+Un backtest describe el pasado: no garantiza el futuro. Los cambios de reglas los decidimos con 50-100 señales reales como mínimo.
