@@ -131,6 +131,7 @@ function Get-NewsSection($sym, $name, [bool]$isCrypto, [switch]$Short) {
             $L += ("🗓️ {0:dd/MM HH:mm} (hora de España) · {1} (EE. UU., impacto alto){2}" -f $loc.DateTime, $e.title, $(if ($dh -gt 0 -and $dh -lt 24) { " ⚠️ en menos de 24 h: suele dar volatilidad" } else { "" })) }
         if (-not $fo -and -not $ev.Count) { $L += "🗓️ No he podido leer el calendario macro ahora." }
     } catch { $L += "🗓️ No he podido leer el calendario macro ahora." }
+    if ($Short -and -not $isCrypto) { try { $ne = Get-NextEarnings $sym; if ($ne) { $L += ("🗓️ Resultados trimestrales de {0}: {1:dd/MM/yyyy} ({2}){3}" -f $sym, $ne.date, $(if ($ne.days -ge 0) { "en $($ne.days) días" } else { "ya publicados" }), $(if ($ne.days -ge 0 -and $ne.days -le 7) { " ⚠️ cercanos: riesgo de salto de precio" } else { "" })) } } catch {} }
     $max = if ($Short) { 3 } else { 5 }
     try {
         $as = @(Get-AssetNews $sym $name $isCrypto 72)
@@ -172,9 +173,9 @@ function Check-NewsOnPositions {             # titulares de riesgo (legal, regul
     if (-not $TelegramToken) { return }
     $slot = [long][Math]::Floor([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() / 14400); if ($slot -eq $script:NwPosAt) { return }; $script:NwPosAt = $slot
     $done = @((Get-ReportState "noticiasw") -split ',' | Where-Object { $_ }); $add = @()
-    foreach ($s in @(Read-Signals | Where-Object { $_.status -in 'open', 'pending' -and ($_.manual -eq $true -or $_.strat -in 'seg-priv', 'seg-grupo', 'ruptura-mercado') })) {
+    foreach ($s in @(Read-Signals | Where-Object { $_.status -in 'open', 'pending' -and $_.strat -in 'seg-grupo', 'ruptura-mercado' })) {
         $isStock = ($s.src -eq 'yahoo'); $sym = $s.sym -replace 'USDT$', ''
-        $toPriv = ($s.manual -eq $true -or $s.strat -eq 'seg-priv'); $toGroup = ($s.strat -in 'seg-grupo', 'ruptura-mercado')
+        $toPriv = $false; $toGroup = ($s.strat -in 'seg-grupo', 'ruptura-mercado')
         try {
             foreach ($n in @(Get-AssetNews $sym $null (-not $isStock) 12)) {
                 $fl = @(Get-NewsFlags $n.title | Where-Object { $_ -match 'legal|regulación|riesgo' }); if (-not $fl.Count) { continue }
@@ -211,7 +212,7 @@ function Scan-UniverseNews {
         $h = [Math]::Abs(($hit + $p.title).GetHashCode()).ToString(); if ($h -in $done -or $h -in $add) { continue }
         $seenDK += $dk
         $m = ("📰 NOTICIA RELEVANTE · {0}`n[{1}] {2}`n{3}, {4}{5}`nEl bot no sabe si es buena o mala para el precio: revísala en la fuente. Si hay operación abierta en este activo, valora el SL." -f $hit, ($fl -join ' · '), $p.title, $p.src, (Get-AgeText $p.when), $(if ($p.link) { "`n" + $p.link } else { "" }))
-        Send-NwMsg $isC $true $m; $add += $h; $sent++
+        Send-NwMsg $false $true $m; $add += $h; $sent++
     }
     if ($add.Count) { Set-ReportState "noticiasu" ((@($done + $add) | Select-Object -Last 150) -join ',') }
 }

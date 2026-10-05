@@ -508,6 +508,7 @@ do {
     try { Send-MacroRemindersIfDue } catch {}
     try { Check-NewsOnPositions } catch {}
     try { Scan-UniverseNews } catch {}
+    try { Review-OpenPositions } catch {}
     try { Send-DailyReport } catch {}
     try { Send-WeeklyReport } catch {}
     Write-Host ("{0} pasada completada" -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor DarkGray

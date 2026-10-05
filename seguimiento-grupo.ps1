@@ -6,7 +6,16 @@ function Import-GroupTracking($file) {
     if (-not (Test-Path $file)) { return }
     $items = Get-Content $file -Raw -Encoding UTF8 | ConvertFrom-Json; $have = @(Read-Signals | ForEach-Object { $_.id })
     foreach ($i in $items) {
-        if ($i.id -in $have) { continue }
+        if ($i.id -in $have) {
+            if ($i.replace -eq $true) {
+                $all = Read-Signals; $r0 = $all | Where-Object { $_.id -eq $i.id } | Select-Object -First 1
+                if ($r0 -and $r0.status -in 'open', 'pending' -and ([double]$r0.sl -ne [double]$i.sl -or [double]$r0.tp1 -ne [double]$i.tp1 -or [double]$r0.tp3 -ne [double]$i.tp3)) {
+                    $r0.sl = [double]$i.sl; $r0.tp1 = [double]$i.tp1; $r0.tp2 = [double]$i.tp2; $r0.tp3 = [double]$i.tp3; $r0.riskAbs = [Math]::Abs([double]$r0.entry - [double]$i.sl); $r0.slPct = $r0.riskAbs / [double]$r0.entry * 100
+                    Save-Signals $all
+                }
+            }
+            continue
+        }
         $lastLabel = [long]0
         try { $k = @((Invoke-RestMethod "$($script:TrkBase)/kline?symbol=$($i.sym)USDT&interval=4h&limit=5" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $lastLabel = [long]$k[$k.Count - 2].time } catch { continue }
         $sg = [int]$i.side; $en = [double]$i.entry; $sl = [double]$i.sl; $risk = [Math]::Abs($en - $sl)
@@ -127,4 +136,49 @@ function Check-SignalHealth {
         Start-Sleep -Milliseconds 150
     }
     Set-ReportState "saludw" ((@($warned | Select-Object -Last 80)) -join ',')
+}
+
+# ---------- Revisión de gestión de TUS operaciones abiertas (strat seg-priv): SOLO al chat privado ----------
+# Cada vela de 4h se mira si hay un soporte/resistencia nuevo que justifique SUBIR el SL (largos) o BAJARLO (cortos), o una resistencia/soporte antes del TP final que aconseje tomar beneficios antes.
+# Un aviso por cambio de nivel. El bot no modifica ninguna orden: lo haces tú en Bitunix.
+$script:RpSlot = 0
+function Review-OpenPositions {
+    if (-not $TelegramToken) { return }
+    $slot = [long][Math]::Floor([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() / 14400); if ($slot -eq $script:RpSlot) { return }; $script:RpSlot = $slot
+    $mem = @{}; foreach ($kv in ((Get-ReportState "ajustes") -split ',' | Where-Object { $_ -match '=' })) { $p = $kv -split '=', 2; $mem[$p[0]] = $p[1] }
+    $tk = $null; $chg = $false
+    foreach ($s in @(Read-Signals | Where-Object { $_.strat -eq 'seg-priv' -and $_.status -eq 'open' })) {
+        try {
+            $sym = $s.sym -replace 'USDT$', ''; $sg = [int]$s.side
+            if (-not $tk) { $tk = @((Invoke-RestMethod "$($script:TrkBase)/tickers").data) }; $row = $tk | Where-Object symbol -eq $s.sym | Select-Object -First 1; if (-not $row) { continue }; $px = [double]$row.lastPrice
+            $cd = Get-MomentoCd @{ src = 'bitunix'; sym = $sym } '4h'; if (-not $cd) { continue }; $a = Analyze-TF $cd '4h' 100; $atr = [double]$a.atr; if ($atr -le 0) { continue }
+            $en = [double]$s.entry; $slEff = if ([int]$s.stage -ge 1) { $en } else { [double]$s.sl }; $tpF = [double]$s.tp3; $msgs = @()
+            $lvls = if ($sg -eq 1) { @($a.sup | ForEach-Object { [double]$_.p } | Where-Object { $_ -lt $px - 0.5 * $atr }) } else { @($a.res | ForEach-Object { [double]$_.p } | Where-Object { $_ -gt $px + 0.5 * $atr }) }
+            if ($lvls.Count) {
+                $near = if ($sg -eq 1) { ($lvls | Measure-Object -Maximum).Maximum } else { ($lvls | Measure-Object -Minimum).Minimum }; $newSl = $near - $sg * 0.3 * $atr
+                $better = if ($sg -eq 1) { $newSl -gt $slEff + 0.5 * $atr } else { $newSl -lt $slEff - 0.5 * $atr }; $last = if ($mem.ContainsKey("$($s.id)|sl")) { [double]$mem["$($s.id)|sl"] } else { $null }
+                $newer = ($null -eq $last) -or ($sg -eq 1 -and $newSl -gt $last + 0.5 * $atr) -or ($sg -eq -1 -and $newSl -lt $last - 0.5 * $atr)
+                if ($better -and $newer) { $msgs += ("🔧 Ajuste de SL: hay un nuevo {0} en {1}. Podrías {2} el SL de {3} a {4} (un poco {5} del nivel), asegurando más y sin quedar pegado al ruido." -f $(if ($sg -eq 1) { "soporte" } else { "resistencia" }), (TaFp $near), $(if ($sg -eq 1) { "subir" } else { "bajar" }), (TaFp $slEff), (TaFp $newSl), $(if ($sg -eq 1) { "por debajo" } else { "por encima" })); $mem["$($s.id)|sl"] = [string]::Format([Globalization.CultureInfo]::InvariantCulture, "{0}", $newSl); $chg = $true }
+            }
+            $obs = if ($sg -eq 1) { @($a.res | ForEach-Object { [double]$_.p } | Where-Object { $_ -gt $px -and $_ -lt $tpF - 0.5 * $atr }) } else { @($a.sup | ForEach-Object { [double]$_.p } | Where-Object { $_ -lt $px -and $_ -gt $tpF + 0.5 * $atr }) }
+            if ($obs.Count) {
+                $ob = if ($sg -eq 1) { ($obs | Measure-Object -Minimum).Minimum } else { ($obs | Measure-Object -Maximum).Maximum }; $lastO = if ($mem.ContainsKey("$($s.id)|tp")) { [double]$mem["$($s.id)|tp"] } else { $null }
+                if ($null -eq $lastO -or [Math]::Abs($ob - $lastO) -gt 0.5 * $atr) { $msgs += ("🎯 Ajuste de TP: hay {0} en {1}, antes de tu TP final ({2}). Valora tomar beneficios allí o bajar el TP un poco antes del nivel." -f $(if ($sg -eq 1) { "una resistencia" } else { "un soporte" }), (TaFp $ob), (TaFp $tpF)); $mem["$($s.id)|tp"] = [string]::Format([Globalization.CultureInfo]::InvariantCulture, "{0}", $ob); $chg = $true }
+            }
+            # noticias de riesgo recientes sobre el activo (legal, regulación, riesgo): se tienen en cuenta SIN reenviar la noticia; se propone proteger la operación
+            $nr = @(); try { foreach ($nw in @(Get-AssetNews $sym $null $true 12)) { $nr += @(Get-NewsFlags $nw.title | Where-Object { $_ -match 'legal|regulación|riesgo' }) } } catch {}
+            $nr = @($nr | Select-Object -Unique)
+            if ($nr.Count) {
+                $kn = "$($s.id)|news|$((Get-Date).ToString('yyyyMMdd'))"
+                if (-not $mem.ContainsKey($kn)) {
+                    $prot = if ($sg * ($px - $en) -gt 0.5 * $atr) { $en + $sg * 0.1 * $atr } elseif ($lvls.Count) { $near - $sg * 0.3 * $atr } else { $slEff }
+                    $improve = if ($sg -eq 1) { $prot -gt $slEff } else { $prot -lt $slEff }
+                    $msgs += ("📰 Tengo en cuenta noticias recientes de riesgo sobre {0} ({1}; no te las reenvío). Por prudencia: {2} TP final sin cambios ({3}) y, si ya estás en beneficio, valora tomar parcial ahora." -f $sym, ($nr -join ' · '), $(if ($improve) { "SL propuesto " + (TaFp $prot) + " (antes " + (TaFp $slEff) + ");" } else { "mantén el SL (" + (TaFp $slEff) + ") sin aflojarlo y no añadas posición;" }), (TaFp $tpF))
+                    $mem[$kn] = "1"; $chg = $true
+                }
+            }
+            if ($msgs.Count) { Send-ToSignalChats (("📌 GESTIÓN DE TU OPERACIÓN · {0} {1} · precio {2} (entrada {3})`n" -f $sym, $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), (TaFp $px), (TaFp $en)) + ($msgs -join "`n") + "`nEl bot no modifica ninguna orden: decides tú. Son sugerencias de estructura de 4h, no garantías.") }
+        } catch {}
+    }
+    if ($chg) { Set-ReportState "ajustes" ((@($mem.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) | Select-Object -Last 40) -join ',') }
 }

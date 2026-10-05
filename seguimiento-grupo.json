@@ -16,7 +16,7 @@
     "note": "Operación real de Luis: BEAMXUSDT largo x10 cruzado"
   },
   {
-    "id": "priv-btc-20261005", "dest": "privado", "sym": "BTC", "side": 1, "entry": 85778.5, "sl": 84300, "tp1": 87250, "tp2": 88000, "tp3": 88740,
+    "id": "priv-btc-20261005", "dest": "privado", "replace": true, "sym": "BTC", "side": 1, "entry": 85778.5, "sl": 85274, "tp1": 86500, "tp2": 87000, "tp3": 87545,
     "note": "Operación real de Luis: BTCUSDT largo x20 aislado"
   }
 ]
