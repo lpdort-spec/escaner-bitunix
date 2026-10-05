@@ -121,7 +121,6 @@ function Build-Report($s) {
     $L += ("⚖️ Derivados Bitunix: funding {0:N4}% por 8h · volumen 24h {1} · libro de órdenes {2:N0}% compradores" -f $s.extra.funding, $vv, $s.extra.bookBuy) }
     if ($s.extra.rank) { $L += "Ranking por capitalización (CoinGecko): #$($s.extra.rank)" }
     $L += ""
-    $L += "❗ NO incluido (sin fuente gratuita y fiable automatizable, así que no se inventa): resultados trimestrales y valoración fundamental (las noticias y el calendario macro van en su sección). Consúltalo en fuentes oficiales (SEC/CNMV, web de la empresa) o pídeselo a Luis."
     $L += "Es información técnica calculada con datos públicos; no es asesoramiento ni garantía."
     return ($L -join "`n")
 }
@@ -148,7 +147,7 @@ function Resolve-Report($raw, $mode) {
         if (-not $s -and $mode -ne "accion") { try { $s = Get-GeckoSeries $base } catch {} }
     }
     if (-not $s) { return "No he podido obtener datos fiables de '$q'. Prueba con el símbolo bursátil exacto (AAPL, MSFT, IREN, SAN.MC para España) o el ticker de la cripto (BTC, SOL). Si el símbolo es correcto, puede que la fuente esté caída: inténtalo más tarde. No voy a inventar datos." }
-    try { $rep = Build-Report $s; if ($note) { $rep += "`n" + $note }; try { $rep += "`n`n" + (Build-Extra $s) } catch { $rep += "`n`n(Las secciones de objetivos, insiders, opciones y volumen no se han podido generar ahora; no envío datos dudosos.)" }; try { $rep += "`n`n" + (Get-NewsSection $s.sym $s.name ($s.src -ne 'yahoo')) } catch { $rep += "`n`n(La sección de noticias no se ha podido generar ahora.)" }; return $rep } catch { return "Tengo datos de '$q' pero ha fallado el cálculo del informe. No envío cifras dudosas." }
+    try { $rep = Build-Report $s; if ($note) { $rep += "`n" + $note }; try { $rep += "`n`n" + (Build-Extra $s) } catch { $rep += "`n`n(Las secciones de objetivos, insiders, opciones y volumen no se han podido generar ahora; no envío datos dudosos.)" }; try { $rep += "`n`n" + (Get-FundamentalsSection $s) } catch { $rep += "`n`n(La sección de resultados y fundamentales no se ha podido generar ahora.)" }; try { $rep += "`n`n" + (Get-NewsSection $s.sym $s.name ($s.src -ne 'yahoo')) } catch { $rep += "`n`n(La sección de noticias no se ha podido generar ahora.)" }; return $rep } catch { return "Tengo datos de '$q' pero ha fallado el cálculo del informe. No envío cifras dudosas." }
 }
 
 # ---------- Telegram ----------
@@ -173,7 +172,7 @@ $script:HelpText = @"
 
 En el grupo escribe / y elige el comando del menú del bot (así Telegram añade el nombre del bot solo).
 Qué datos usa: Bitunix, TradingView (lectura pública de su escáner técnico), Binance, Bybit, OKX, Coinbase, Deribit, CoinGecko, Yahoo Finance, SEC EDGAR, CNN y Alternative.me (índices de miedo/codicia). Cada informe cita sus fuentes y dice cuáles respondieron.
-Qué NO hace: valorar si una noticia es buena o mala, resultados fundamentales, recomendaciones de compra o venta. Los objetivos a 3 y 5 años son escenarios matemáticos, no pronósticos. Si no hay dato fiable, lo dice.
+Qué hace además: resultados trimestrales, valoración, comunicados de la SEC y de la empresa, noticias y calendario macro. Qué NO hace: valorar si una noticia es buena o mala, resultados fundamentales, recomendaciones de compra o venta. Los objetivos a 3 y 5 años son escenarios matemáticos, no pronósticos. Si no hay dato fiable, lo dice.
 "@
 
 # ---------- /riesgo: análisis riesgo/beneficio de una operación con los datos que da el usuario ----------
@@ -343,3 +342,4 @@ if (Test-Path (Join-Path $PSScriptRoot "analisis-tecnico.ps1")) { . (Join-Path $
 if (Test-Path (Join-Path $PSScriptRoot "momento.ps1")) { . (Join-Path $PSScriptRoot "momento.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "noticias.ps1")) { . (Join-Path $PSScriptRoot "noticias.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "fundamentales.ps1")) { . (Join-Path $PSScriptRoot "fundamentales.ps1") }
