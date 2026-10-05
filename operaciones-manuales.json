@@ -10,5 +10,17 @@
     "sym": "CBRS", "side": 1, "entry": 167.34, "sl": 170, "sl0": 125.505, "tp": 210,
     "margin": 225.11, "lev": 5, "qty": 6.72, "exit": 175.60, "pnlReal": 53.7099, "closedAt": 1791174178, "outcome": "cierre manual",
     "note": "Operación real de Luis en Bitunix (captura 2026-10-03): CBRSUSDT largo x5, aislado; SL inicial 25% bajo la entrada (125,505), movido después a 170 (por encima de la entrada)"
+  },
+  {
+    "id": "manual-mubarak-20261005",
+    "sym": "MUBARAK", "side": 1, "entry": 0.07414, "sl": 0.0698, "tp": 0.0870,
+    "margin": 203.3359, "lev": 6, "qty": 16395,
+    "note": "Operación real de Luis en Bitunix (captura 2026-10-05): MUBARAKUSDT largo x6, aislado; SL y TP propuestos por el bot (SL = 35% del margen; TP parcial 0,0785 y final 0,0870)"
+  },
+  {
+    "id": "manual-beamx-20261005",
+    "sym": "BEAMX", "side": 1, "entry": 0.002538, "sl": 0.002449, "tp": 0.0030,
+    "margin": 103.9374, "lev": 10, "qty": 407082,
+    "note": "Operación real de Luis en Bitunix (captura 2026-10-05): BEAMXUSDT largo x10, margen cruzado; SL y TP propuestos por el bot (SL = 35% del margen; TP parcial 0,002627 y final 0,0030)"
   }
 ]

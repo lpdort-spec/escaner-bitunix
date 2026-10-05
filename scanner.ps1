@@ -40,6 +40,7 @@ if (Test-Path (Join-Path $PSScriptRoot "commands.ps1")) { . (Join-Path $PSScript
 if (Test-Path (Join-Path $PSScriptRoot "scanner-mercado.ps1")) { . (Join-Path $PSScriptRoot "scanner-mercado.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "vigilancia.ps1")) { . (Join-Path $PSScriptRoot "vigilancia.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "avisos-momento.ps1")) { . (Join-Path $PSScriptRoot "avisos-momento.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "seguimiento-grupo.ps1")) { . (Join-Path $PSScriptRoot "seguimiento-grupo.ps1") }
 $TelegramSignalChatId = $env:TELEGRAM_SIGNAL_CHAT_ID
 if (-not $TelegramSignalChatId -and (Test-Path $cfg)) { try { $TelegramSignalChatId = (Get-Content $cfg -Raw | ConvertFrom-Json).signalChatId } catch {} }
 # destinos de las señales: el secreto del chat privado; si no está configurado, SOLO chats privados (id positivo), nunca grupos (id negativo)
@@ -491,7 +492,8 @@ function Run-SweepObsIfDue {                       # solo cuando acaba de cerrar
 
 Write-Host "Buscando setups de alto potencial en top $TopN pares Bitunix ($($Interval -join ', ')) [$($Strategies -join ', ')] cada $EverySeconds s. Ctrl+C para parar." -ForegroundColor Cyan
 $script:startAt = Get-Date
-try { Import-ManualTrades (Join-Path $PSScriptRoot "operaciones-manuales.json") } catch {}      # tus operaciones reales entran en el seguimiento (solo se importan una vez)
+try { Import-ManualTrades (Join-Path $PSScriptRoot "operaciones-manuales.json") } catch {}
+try { Import-GroupTracking (Join-Path $PSScriptRoot "seguimiento-grupo.json") } catch {}      # tus operaciones reales entran en el seguimiento (solo se importan una vez)
 do {
     try { Update-Signals $base } catch {}
     foreach ($iv in $Interval) { Scan $iv }
@@ -501,6 +503,8 @@ do {
     try { Send-IrenWeeklyIfDue } catch {}
     try { Run-MomentoCryptoIfDue } catch {}
     try { Run-MomentoStocksIfDue } catch {}
+    try { Notify-GroupTracking } catch {}
+    try { Check-SignalHealth } catch {}
     try { Send-DailyReport } catch {}
     try { Send-WeeklyReport } catch {}
     Write-Host ("{0} pasada completada" -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor DarkGray

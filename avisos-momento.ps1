@@ -20,13 +20,42 @@ function Get-MomScores($s) {
     return @{ lg = (Score-Momento 1 $a4 $a1 $tvr $px $sentVal $fund); st = (Score-Momento -1 $a4 $a1 $tvr $px $sentVal $fund) }
 }
 
-function Build-MomAlert($kind, $sym, $side, $score) {
+# Ficha de orden para copiar en Bitunix (SOLO chat privado): posición de 200 USDT de margen, apalancamiento orientativo para que el SL cueste como máximo el 35% del margen.
+# El bot NO abre ni cierra operaciones: solo calcula los valores para que los pongas tú.
+function Build-OrderCard($side, $plan) {
+    if (-not $plan) { return $null }
+    $sg = if ($side -eq 'L') { 1 } else { -1 }; $en = [double]$plan.entry; $sl = [double]$plan.sl; $mg = 200.0
+    $slPct = [Math]::Abs($sl - $en) / $en * 100; if ($slPct -le 0) { return $null }
+    $lev = [Math]::Min(20, [Math]::Floor(35.0 / $slPct))
+    $L = @("📋 FICHA DE ORDEN · posición de 200 USDT de margen")
+    if ($lev -lt 1) { $L += ("• El SL está a {0:N1}% del precio: con x1 ya perderías más del 35% del margen. Reduce el margen o descarta esta entrada." -f $slPct); return ($L -join "`n") }
+    $nom = $mg * $lev; $qty = $nom / $en; $loss = $nom * $slPct / 100; $liq = 100.0 / $lev
+    $roi = { param($p) $sg * ($p - $en) / $en * 100 * $lev }
+    $t1 = $en + $sg * [Math]::Abs($en - $sl) * 1; $t2 = $en + $sg * [Math]::Abs($en - $sl) * 2; $t3 = $en + $sg * [Math]::Abs($en - $sl) * 3
+    $R = [Math]::Abs($en - $sl); $obWarn = $false
+    if ($plan.ob) { $ob = [double]$plan.ob
+        if ($sg * ($ob - $en) -gt 1.05 * $R) { $fin = $ob - $sg * 0.1 * $R; if ($sg * ($t3 - $fin) -gt 0) { $t3 = $fin }; if ($sg * ($t2 - $t3) -ge 0) { $t2 = ($t1 + $t3) / 2 } }
+        else { $obWarn = $true } }
+    $L += ("• {0} · entrada {1}{2}" -f $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), (TaFp $en), $(if ($plan.pullback) { " (orden limit en el retroceso)" } else { " (a mercado o limit cerca del precio actual)" }))
+    $L += ("• Apalancamiento orientativo: x{0:N0} · tamaño ≈ {1:N0} USDT ({2} uds)" -f $lev, $nom, (TaFp $qty))
+    $L += ("• SL: {0} (-{1:N1}% del precio; pérdida ≈ {2:N0} USDT = {3:N0}% del margen)" -f (TaFp $sl), $slPct, $loss, ($loss / $mg * 100))
+    $L += ("• TP parcial (1/3): {0} (ROI +{1:N0}%)" -f (TaFp $t1), (& $roi $t1))
+    $L += ("• TP intermedio (1/3): {0} (ROI +{1:N0}%) · tras el TP parcial, mueve el SL a la entrada" -f (TaFp $t2), (& $roi $t2))
+    $L += ("• TP final (1/3): {0} (ROI +{1:N0}%)" -f (TaFp $t3), (& $roi $t3))
+    $L += ("• Liquidación ≈ a {0:N0}% del precio en contra: {1}" -f $liq, $(if ($slPct -lt $liq * 0.7) { "queda bastante más lejos que el SL ✔" } else { "⚠️ demasiado cerca del SL: baja el apalancamiento" }))
+    if ($obWarn) { $L += "⚠️ Hay un obstáculo a menos de 1R: los objetivos pueden no llegar a cumplirse." }
+    $L += "El bot no abre ni cierra operaciones: pon estas órdenes tú en Bitunix (botón TP/SL de la posición)."
+    return ($L -join "`n")
+}
+function Build-MomAlert($kind, $sym, $side, $score, $plan = $null, [switch]$Priv) {
     $mode = if ($kind -eq 'cripto') { 'cripto' } else { 'accion' }
     $rep = Get-MomentoReport $sym $mode $(if ($side -eq 'L') { 'largo' } else { 'corto' })
     if ($rep -like 'No he podido*' -or $rep -like 'Tengo el precio*') { return $null }
     $dirU = if ($side -eq 'L') { "LARGO" } else { "CORTO" }
     $h = "🔔 AVISO DE BUEN MOMENTO · $dirU · $sym`n(Revisión automática con las velas cerradas · puntuación $score; umbral de aviso $(Get-MomCfg 'umbralMomento' 7))"
     if ($kind -ne 'cripto') { $h += "`nEn opciones: LARGO ≈ call y CORTO ≈ put. Este análisis no valora la prima, el vencimiento ni la volatilidad implícita de la opción: solo la dirección del subyacente." }
+    $card = if ($Priv) { Build-OrderCard $side $plan } else { $null }
+    if ($card) { $h += "`n`n" + $card }
     return $h + "`n`n" + $rep
 }
 
@@ -46,11 +75,20 @@ function Invoke-MomItems($kind, $items, [switch]$Dry) {
                 $score = if ($side -eq 'L') { $sc.lg.score } else { $sc.st.score }; $key = "${sym}:$side"
                 if ($score -ge $thr -and $key -notin $act) {
                     if ($script:MomSent -ge $cap) { continue }
-                    $msg = Build-MomAlert $kind $sym $side $score; if (-not $msg) { continue }
-                    if ($kind -eq 'cripto') { Send-ToSignalChats $msg }
+                    $plan = if ($side -eq 'L') { $sc.lg.plan } else { $sc.st.plan }
+                    $msg = Build-MomAlert $kind $sym $side $score $plan; if (-not $msg) { continue }
+                    if ($kind -eq 'cripto') { Send-ToSignalChats (Build-MomAlert $kind $sym $side $score $plan -Priv) }
                     if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $msg $null }
                     $act += $key; $sent++; $script:MomSent++
-                } elseif ($score -lt ($thr - 3) -and $key -in $act) { $act = @($act | Where-Object { $_ -ne $key }) }
+                } elseif ($score -lt ($thr - 3) -and $key -in $act) {
+                    $act = @($act | Where-Object { $_ -ne $key })
+                    # el aviso de buen momento ya no se cumple: se avisa de que, si se abrió, conviene valorar cerrarla o protegerla (mismos destinos que el aviso original)
+                    $me = if ($side -eq 'L') { $sc.lg } else { $sc.st }; $neg = @($me.fx | Where-Object { $_ -like '⚠️*' } | Select-Object -First 4)
+                    $cm = "⚠️ CAMBIO SIGNIFICATIVO · $sym $(if ($side -eq 'L') { 'LARGO' } else { 'CORTO' }) · valora CERRAR o proteger la operación`nEl aviso de buen momento ya no se cumple: la puntuación bajó de $thr o más a $score."
+                    if ($neg.Count) { $cm += "`nFactores que ahora están en contra:`n" + (($neg | ForEach-Object { "   $_" }) -join "`n") }
+                    $cm += "`nEl bot no cierra nada: decides tú. Si no abriste esa operación, simplemente deja de estar vigente el aviso."
+                    if (-not $Dry) { if ($kind -eq 'cripto') { Send-ToSignalChats $cm }; if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $cm $null } }
+                }
             }
         } catch {}
         Start-Sleep -Milliseconds 150

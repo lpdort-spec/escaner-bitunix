@@ -1,0 +1,10 @@
+﻿[
+  {
+    "id": "seg-orca-20261005", "sym": "ORCA", "side": 1, "entry": 1.9019, "sl": 1.8185, "tp1": 1.9854, "tp2": 2.0689, "tp3": 2.1523, "expiry": 12,
+    "note": "Oportunidad no operada: ORCAUSDT largo, entrada limit en el retroceso (el precio estaba extendido, RSI 4h 75)"
+  },
+  {
+    "id": "seg-ldo-20261005", "sym": "LDO", "side": 1, "entry": 0.45765, "sl": 0.44439, "tp1": 0.47090, "tp2": 0.48416, "tp3": 0.49741, "expiry": 12,
+    "note": "Oportunidad no operada: LDOUSDT largo, entrada limit en el retroceso; resistencia en 0,4720 cerca del TP parcial"
+  }
+]

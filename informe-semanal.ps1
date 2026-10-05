@@ -45,7 +45,7 @@ function Get-ContextFlags($s) {
 }
 
 function Get-WeeklyDeepReport {
-    $now = Get-MadridNow; $all = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' })
+    $now = Get-MadridNow; $all = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' -and $_.strat -ne 'seg-grupo' -and $_.strat -ne 'momento-obs' })
     $wkStart = [DateTimeOffset]::UtcNow.AddDays(-7).ToUnixTimeSeconds()
     $week = @($all | Where-Object { [long]$_.time -ge $wkStart })
     $wkCl = @($week | Where-Object { $_.status -eq 'closed' }); $allCl = @($all | Where-Object { $_.status -eq 'closed' })

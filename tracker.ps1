@@ -97,7 +97,7 @@ function Group-Stats($items, $label) {
 }
 
 function Get-Report {
-    $all = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' })      # manuales, observación y mercado se informan aparte
+    $all = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' -and $_.strat -ne 'seg-grupo' -and $_.strat -ne 'momento-obs' })      # manuales, observación y mercado se informan aparte
     $cl = @($all | Where-Object { $_.status -eq 'closed' })
     $open = @($all | Where-Object { $_.status -in 'open', 'pending' }).Count
     $un = @($all | Where-Object { $_.status -eq 'unfilled' }).Count
