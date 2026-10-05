@@ -126,6 +126,7 @@ function Build-Report($s) {
 }
 
 function Resolve-Report($raw, $mode) {
+    $rsR = Resolve-SymbolText $raw; $raw = $rsR.sym; $symNote = $rsR.note
     $q = ($raw -replace '[^A-Za-z0-9.\-\^=]', '').ToUpper()
     if (-not $q -or $q.Length -gt 15) { return "No he entendido el símbolo. Ejemplos: /informe BTC · /informe ETH · /informe AAPL · /informe IREN · /informe SAN.MC" }
     $s = $null; $note = ""; $base = $q -replace 'USDT$', ''
@@ -146,8 +147,9 @@ function Resolve-Report($raw, $mode) {
         if (-not $s -and $mode -ne "accion") { try { $s = Get-BitunixSeries $base } catch {} }
         if (-not $s -and $mode -ne "accion") { try { $s = Get-GeckoSeries $base } catch {} }
     }
+    if (-not $s -and -not $script:InSearch) { $rs2 = Resolve-SymbolText $q -Force; if ($rs2.sym -and $rs2.sym -ne $q) { $script:InSearch = $true; try { $r2 = Resolve-Report $rs2.sym $mode } finally { $script:InSearch = $false }; return ($(if ($rs2.note) { $rs2.note + "`n`n" } else { "" }) + $r2) } }
     if (-not $s) { return "No he podido obtener datos fiables de '$q'. Prueba con el símbolo bursátil exacto (AAPL, MSFT, IREN, SAN.MC para España) o el ticker de la cripto (BTC, SOL). Si el símbolo es correcto, puede que la fuente esté caída: inténtalo más tarde. No voy a inventar datos." }
-    try { $rep = Build-Report $s; if ($note) { $rep += "`n" + $note }; try { $rep += "`n`n" + (Build-Extra $s) } catch { $rep += "`n`n(Las secciones de objetivos, insiders, opciones y volumen no se han podido generar ahora; no envío datos dudosos.)" }; try { $rep += "`n`n" + (Get-FundamentalsSection $s) } catch { $rep += "`n`n(La sección de resultados y fundamentales no se ha podido generar ahora.)" }; try { $rep += "`n`n" + (Get-NewsSection $s.sym $s.name ($s.src -ne 'yahoo')) } catch { $rep += "`n`n(La sección de noticias no se ha podido generar ahora.)" }; return $rep } catch { return "Tengo datos de '$q' pero ha fallado el cálculo del informe. No envío cifras dudosas." }
+    try { $rep = Build-Report $s; if ($symNote) { $rep = $symNote + "`n`n" + $rep }; if ($note) { $rep += "`n" + $note }; try { $rep += "`n`n" + (Build-Extra $s) } catch { $rep += "`n`n(Las secciones de objetivos, insiders, opciones y volumen no se han podido generar ahora; no envío datos dudosos.)" }; try { $rep += "`n`n" + (Get-FundamentalsSection $s) } catch { $rep += "`n`n(La sección de resultados y fundamentales no se ha podido generar ahora.)" }; try { $rep += "`n`n" + (Get-NewsSection $s.sym $s.name ($s.src -ne 'yahoo')) } catch { $rep += "`n`n(La sección de noticias no se ha podido generar ahora.)" }; return $rep } catch { return "Tengo datos de '$q' pero ha fallado el cálculo del informe. No envío cifras dudosas." }
 }
 
 # ---------- Telegram ----------
@@ -159,8 +161,8 @@ function Send-Tg($token, $chat, $text, $replyTo = $null) {
 }
 $script:HelpText = @"
 🤖 Bot de Alertas Bitunix · comandos
-/informe SIMBOLO · informe completo de una cripto o una acción (técnico, charting, Fibonacci, Bollinger, TradingView, sentimiento FOMO/FUD, objetivos a 1-3-5 años, insiders, put/call, zonas de volumen, ballenas, derivados, instituciones)
-   Ejemplos: /informe BTC · /informe SOL · /informe AAPL · /informe IREN · /informe SAN.MC
+/informe SIMBOLO (o NOMBRE o ISIN) · informe completo de cualquier cripto, acción, ETF, índice, materia prima o divisa (EE. UU. y Europa) (técnico, charting, Fibonacci, Bollinger, TradingView, sentimiento FOMO/FUD, objetivos a 1-3-5 años, insiders, put/call, zonas de volumen, ballenas, derivados, instituciones)
+   Ejemplos: /informe BTC · /informe AAPL · /informe SAN.MC · /informe SAP.DE · /informe VWCE.DE · /informe Inditex · /informe ES0148396007 · /informe ^IBEX · /informe GC=F
    Si hay confusión: /informe COIN accion  o  /informe ARB cripto
 /precio SIMBOLO · precio rápido
 /riesgo PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · analiza el riesgo/beneficio de tu operación (R:B, acierto mínimo, comisiones, liquidación, estado actual) y su lectura técnica (soportes/resistencias, Fibonacci, TradingView)
@@ -309,28 +311,29 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
             }
             "/precio" {
                 if (-not $args1) { Send-Tg $token $chat "Uso: /precio SIMBOLO (ej. /precio BTC o /precio AAPL)" $m.message_id; break }
-                $q = ($args1[0] -replace '[^A-Za-z0-9.\-\^=]', '').ToUpper(); $out = $null
+                $rsP = Resolve-SymbolText ($args1 -join ' '); $q = ($rsP.sym -replace '[^A-Za-z0-9.\-\^=]', '').ToUpper(); $out = $null
                 try { $tk = (Invoke-RestMethod "$($script:CmdBase)/tickers").data | Where-Object symbol -eq "$($q -replace 'USDT$','')USDT"; if ($tk) { $out = "{0}/USDT: {1} USDT ({2:+0.00;-0.00}% en 24h). Fuente: Bitunix, en vivo." -f ($q -replace 'USDT$',''), (Fnum ([double]$tk.lastPrice)), ((([double]$tk.lastPrice - [double]$tk.open) / [double]$tk.open) * 100) } } catch {}
                 if (-not $out) { $y = Get-YahooSeries $q; if ($y) { $out = "{0}: {1} {2}. Fuente: Yahoo Finance ({3}); puede llevar retraso." -f $y.name, (Fnum $y.price), $y.currency, $y.lastDate } }
                 if (-not $out) { $out = "No he podido obtener un precio fiable de '$q'. No voy a inventarlo." }
                 elseif (Get-Command Resolve-TvTarget -ErrorAction SilentlyContinue) {
                     try { $isBx = $out -like '*Bitunix*'; $tvT = Resolve-TvTarget $(if ($isBx) { 'bitunix' } else { 'yahoo' }) ($q -replace 'USDT$', '') $null; $out += "`n" + ((Get-TvLines $tvT -Short) -join "`n") } catch {}
                 }
+                if ($rsP.note -and $out -notlike 'No he podido*') { $out = $rsP.note + "`n" + $out }
                 Send-Tg $token $chat $out $m.message_id
             }
             "/momento" {
                 if (-not $args1) { Send-Tg $token $chat "Uso: /momento SIMBOLO [largo|corto]`nEjemplos: /momento AAPL · /momento BTC · /momento SAN.MC corto`nTe digo, con reglas fijas y visibles, si es buen momento para abrir un largo o un corto en ese activo." $m.message_id; break }
-                $mode = ""; $side = ""
-                foreach ($w in @($args1 | Select-Object -Skip 1)) { $w1 = $w.ToLower(); if ($w1 -in 'largo', 'long', 'compra') { $side = 'largo' } elseif ($w1 -in 'corto', 'short', 'venta') { $side = 'corto' } elseif ($w1 -in 'accion', 'acción', 'bolsa', 'stock') { $mode = 'accion' } elseif ($w1 -in 'cripto', 'crypto') { $mode = 'cripto' } }
-                Send-Tg $token $chat "⏳ Analizando el momento de $($args1[0].ToUpper())..." $m.message_id
-                $rep = try { Get-MomentoReport $args1[0] $mode $side } catch { "No he podido completar el análisis ahora: $($_.Exception.Message)" }
+                $mode = ""; $side = ""; $qw = Get-QueryWords $args1 @("largo", "long", "compra", "corto", "short", "venta", "accion", "acción", "bolsa", "stock", "cripto", "crypto")
+                foreach ($w1 in $qw.kw) { if ($w1 -in 'largo', 'long', 'compra') { $side = 'largo' } elseif ($w1 -in 'corto', 'short', 'venta') { $side = 'corto' } elseif ($w1 -in 'accion', 'acción', 'bolsa', 'stock') { $mode = 'accion' } elseif ($w1 -in 'cripto', 'crypto') { $mode = 'cripto' } }
+                Send-Tg $token $chat "⏳ Analizando el momento de $($qw.text.ToUpper())..." $m.message_id
+                $rep = try { Get-MomentoReport $qw.text $mode $side } catch { "No he podido completar el análisis ahora: $($_.Exception.Message)" }
                 Send-Tg $token $chat $rep $null
             }
             "/informe" {
                 if (-not $args1) { Send-Tg $token $chat "Uso: /informe SIMBOLO (ej. /informe BTC, /informe AAPL, /informe IREN)" $m.message_id; break }
-                $mode = ""; if ($args1.Count -gt 1) { $w = $args1[1].ToLower(); if ($w -in "accion", "acción", "bolsa", "stock") { $mode = "accion" } elseif ($w -in "cripto", "crypto") { $mode = "cripto" } }
-                Send-Tg $token $chat "⏳ Preparando el informe de $($args1[0].ToUpper())..." $m.message_id
-                Send-Tg $token $chat (Resolve-Report $args1[0] $mode) $null
+                $qw = Get-QueryWords $args1 @("accion", "acción", "bolsa", "stock", "cripto", "crypto"); $mode = ""; foreach ($w in $qw.kw) { if ($w -in "accion", "acción", "bolsa", "stock") { $mode = "accion" } elseif ($w -in "cripto", "crypto") { $mode = "cripto" } }
+                Send-Tg $token $chat "⏳ Preparando el informe de $($qw.text.ToUpper())..." $m.message_id
+                Send-Tg $token $chat (Resolve-Report $qw.text $mode) $null
             }
             "/riesgo" { Send-Tg $token $chat (Build-RiskReport $args1) $m.message_id }
             default { }
@@ -341,5 +344,6 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
 if (Test-Path (Join-Path $PSScriptRoot "analisis-tecnico.ps1")) { . (Join-Path $PSScriptRoot "analisis-tecnico.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "momento.ps1")) { . (Join-Path $PSScriptRoot "momento.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "busqueda.ps1")) { . (Join-Path $PSScriptRoot "busqueda.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "noticias.ps1")) { . (Join-Path $PSScriptRoot "noticias.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "fundamentales.ps1")) { . (Join-Path $PSScriptRoot "fundamentales.ps1") }

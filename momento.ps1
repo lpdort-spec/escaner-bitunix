@@ -76,7 +76,9 @@ function Score-Momento([int]$sg, $a4, $a1, $tvR, [double]$px, $sentVal, $fund) {
 }
 
 function Get-MomentoReport($raw, $mode, $wantSide) {
+    $rsM = Resolve-SymbolText $raw; $raw = $rsM.sym
     $s = Resolve-SeriesM $raw $mode
+    if (-not $s -and $raw) { $rsM2 = Resolve-SymbolText $raw -Force; if ($rsM2.sym -and $rsM2.sym -ne $raw) { $s = Resolve-SeriesM $rsM2.sym $mode; if ($s) { $rsM = $rsM2 } } }
     if (-not $s) { return "No he podido obtener datos fiables de '$($raw.ToUpper())'. Prueba con el símbolo exacto (AAPL, MSFT, SAN.MC, BTC, SOL...). No voy a inventar datos." }
     $cd4 = Get-MomentoCd $s '4h'; $cd1 = Get-MomentoCd $s '1d'
     if (-not $cd4 -and -not $cd1) { return "Tengo el precio de $($s.name) pero no velas suficientes para una lectura fiable del momento. No hago un veredicto sin datos." }
@@ -89,6 +91,7 @@ function Get-MomentoReport($raw, $mode, $wantSide) {
     $st = Score-Momento -1 $a4 $a1 $(if ($tv) { $tv.rating } else { $null }) $px $sentVal $fund
     $verd = { param($p) if ($p -ge 7) { "🟢 BUEN MOMENTO RELATIVO" } elseif ($p -ge 4) { "🟡 ACEPTABLE CON CAUTELA (mejor entrando en un retroceso)" } elseif ($p -ge 1) { "🟠 POCO FAVORABLE: mejor esperar" } else { "🔴 NO ES BUEN MOMENTO" } }
     $L = @()
+    if ($rsM.note) { $L += $rsM.note; $L += "" }
     $L += ("🧭 ¿ES BUEN MOMENTO? · {0} · precio {1} {2}" -f $s.name, (TaFp $px), $s.currency)
     $L += ""
     $L += ("📈 LARGO: {0} (puntuación {1})" -f (& $verd $lg.score), $lg.score)
