@@ -1,2 +1,4 @@
 ﻿momc=124388:100
 momact=BEAMX:L,MUBARAK:L,ORCA:L,LDO:L
+salud=124388|
+saludw=
