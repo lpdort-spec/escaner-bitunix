@@ -6,5 +6,17 @@
   {
     "id": "seg-ldo-20261005", "sym": "LDO", "side": 1, "entry": 0.45765, "sl": 0.44439, "tp1": 0.47090, "tp2": 0.48416, "tp3": 0.49741, "expiry": 12,
     "note": "Oportunidad no operada: LDOUSDT largo, entrada limit en el retroceso; resistencia en 0,4720 cerca del TP parcial"
+  },
+  {
+    "id": "priv-mubarak-20261005", "dest": "privado", "sym": "MUBARAK", "side": 1, "entry": 0.07414, "sl": 0.0698, "tp1": 0.0785, "tp2": 0.0828, "tp3": 0.0870,
+    "note": "Operación real de Luis: MUBARAKUSDT largo x6 aislado"
+  },
+  {
+    "id": "priv-beamx-20261005", "dest": "privado", "sym": "BEAMX", "side": 1, "entry": 0.002538, "sl": 0.002449, "tp1": 0.002627, "tp2": 0.002717, "tp3": 0.0030,
+    "note": "Operación real de Luis: BEAMXUSDT largo x10 cruzado"
+  },
+  {
+    "id": "priv-btc-20261005", "dest": "privado", "sym": "BTC", "side": 1, "entry": 85778.5, "sl": 84300, "tp1": 87250, "tp2": 88000, "tp3": 88740,
+    "note": "Operación real de Luis: BTCUSDT largo x20 aislado"
   }
 ]

@@ -11,10 +11,10 @@ function Import-GroupTracking($file) {
         try { $k = @((Invoke-RestMethod "$($script:TrkBase)/kline?symbol=$($i.sym)USDT&interval=4h&limit=5" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $lastLabel = [long]$k[$k.Count - 2].time } catch { continue }
         $sg = [int]$i.side; $en = [double]$i.entry; $sl = [double]$i.sl; $risk = [Math]::Abs($en - $sl)
         Add-SignalRecord ([ordered]@{
-            id = $i.id; time = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); sym = "$($i.sym)USDT"; tf = "4h"; strat = "seg-grupo"; side = $sg
-            entryType = "limit"; entry = $en; sl = $sl; tp1 = [double]$i.tp1; tp2 = [double]$i.tp2; tp3 = [double]$i.tp3; riskAbs = $risk; slPct = ($risk / $en * 100)
+            id = $i.id; time = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); sym = "$($i.sym)USDT"; tf = "4h"; strat = $(if ($i.dest -eq "privado") { "seg-priv" } else { "seg-grupo" }); side = $sg
+            entryType = $(if ($i.dest -eq "privado") { "market" } else { "limit" }); entry = $en; sl = $sl; tp1 = [double]$i.tp1; tp2 = [double]$i.tp2; tp3 = [double]$i.tp3; riskAbs = $risk; slPct = ($risk / $en * 100)
             ratio = $null; trend = $null; aligned = $null; btcAligned = $null; pool = ""; risk = "SEGUIMIENTO"
-            status = "pending"; stage = 0; realized = 0.0; age = 0; lastLabel = $lastLabel; lab0 = $lastLabel; expiry = $(if ($i.expiry) { [int]$i.expiry } else { 12 })
+            status = $(if ($i.dest -eq "privado") { "open" } else { "pending" }); stage = 0; realized = 0.0; age = 0; lastLabel = $lastLabel; lab0 = $lastLabel; expiry = $(if ($i.expiry) { [int]$i.expiry } else { 12 })
             cost = 0.0015; outcome = $null; R = $null; net = $null; note = $i.note
         })
     }
@@ -59,24 +59,28 @@ function Explain-GroupOutcome($s) {
 
 function Fmt-GtLevels($s) { return ("entrada {0} · SL {1} · TP parcial {2} · TP2 {3} · TP final {4}" -f (TaFp $s.entry), (TaFp $s.sl), (TaFp $s.tp1), (TaFp $s.tp2), (TaFp $s.tp3)) }
 
+function Send-GtMsg($priv, $text) {
+    if ($priv) { $text = $text.Replace('SEGUIMIENTO', 'TU OPERACIÓN').Replace('Es un seguimiento de una oportunidad que no se operó: sirve para comprobar si la lectura funciona. No es asesoramiento.', 'Seguimiento de tu operación con el plan propuesto (SL, TP parcial y final). No es asesoramiento.'); Send-ToSignalChats $text }
+    elseif ($script:MktChat) { Send-Tg $TelegramToken $script:MktChat $text $null }
+}
 function Notify-GroupTracking {
-    if (-not ($TelegramToken -and $script:MktChat)) { return }
+    if (-not $TelegramToken) { return }
     $sigs = Read-Signals; $dirty = $false
-    foreach ($s in @($sigs | Where-Object { $_.strat -eq 'seg-grupo' })) {
-        $tok = "$($s.closeNote)"; $sym = $s.sym -replace 'USDT$', ''; $dir = if ([int]$s.side -eq 1) { "LARGO" } else { "CORTO" }; $msg = $null
+    foreach ($s in @($sigs | Where-Object { $_.strat -in 'seg-grupo', 'seg-priv' })) {
+        $priv = ($s.strat -eq 'seg-priv'); $tok = "$($s.closeNote)"; $sym = $s.sym -replace 'USDT$', ''; $dir = if ([int]$s.side -eq 1) { "LARGO" } else { "CORTO" }; $msg = $null
         if ($s.status -eq 'unfilled' -and $tok -notlike '*X*') {
             $msg = "👁️ SEGUIMIENTO · $sym $dir · SIN EJECUCIÓN`nLa orden limit (" + (TaFp $s.entry) + ") no llegó a ejecutarse: " + $s.note + ". Sin entrada, no hay resultado que contar.`nQué significa: el precio no hizo el retroceso al nivel previsto" + $(if ("$($s.note)" -like '*se fue*') { " y se fue directo hacia los objetivos (el movimiento se dio sin darnos entrada)." } elseif ("$($s.note)" -like '*invalidada*') { ", sino que perdió el nivel del stop antes de tocar la entrada (setup invalidado)." } else { " en el plazo previsto." })
-            $s.closeNote = "$tok" + "X"; $dirty = $true
+            $s.closeNote = "$tok" + "X"; $dirty = $true; Send-GtMsg $priv $msg
         }
         elseif ($s.status -in 'open', 'closed') {
-            if ($tok -notlike '*F*') { $tok += "F"; $s.closeNote = $tok; $dirty = $true; Send-Tg $TelegramToken $script:MktChat ("👁️ SEGUIMIENTO · $sym $dir · ORDEN EJECUTADA`nEl precio hizo el retroceso y tocó la entrada: " + (Fmt-GtLevels $s)) $null }
-            if ([int]$s.stage -ge 1 -and $tok -notlike '*1*') { $tok += "1"; $s.closeNote = $tok; $dirty = $true; Send-Tg $TelegramToken $script:MktChat ("✅ SEGUIMIENTO · $sym $dir · TP PARCIAL ALCANZADO (" + (TaFp $s.tp1) + ")`nSe asegura un tercio y el SL pasa a la entrada (" + (TaFp $s.entry) + "): desde aquí la operación ya no puede dar pérdida, salvo comisiones.") $null }
-            if ([int]$s.stage -ge 2 -and $tok -notlike '*2*') { $tok += "2"; $s.closeNote = $tok; $dirty = $true; Send-Tg $TelegramToken $script:MktChat ("✅ SEGUIMIENTO · $sym $dir · TP2 ALCANZADO (" + (TaFp $s.tp2) + ")`nSegundo tercio asegurado; queda el último tercio hacia el TP final (" + (TaFp $s.tp3) + ").") $null }
+            if ($tok -notlike '*F*') { $tok += "F"; $s.closeNote = $tok; $dirty = $true; if (-not $priv) { Send-GtMsg $priv ("👁️ SEGUIMIENTO · $sym $dir · ORDEN EJECUTADA`nEl precio hizo el retroceso y tocó la entrada: " + (Fmt-GtLevels $s)) } }
+            if ([int]$s.stage -ge 1 -and $tok -notlike '*1*') { $tok += "1"; $s.closeNote = $tok; $dirty = $true; Send-GtMsg $priv ("✅ SEGUIMIENTO · $sym $dir · TP PARCIAL ALCANZADO (" + (TaFp $s.tp1) + ")`nSe asegura un tercio y el SL pasa a la entrada (" + (TaFp $s.entry) + "): desde aquí la operación ya no puede dar pérdida, salvo comisiones.") }
+            if ([int]$s.stage -ge 2 -and $tok -notlike '*2*') { $tok += "2"; $s.closeNote = $tok; $dirty = $true; Send-GtMsg $priv ("✅ SEGUIMIENTO · $sym $dir · TP2 ALCANZADO (" + (TaFp $s.tp2) + ")`nSegundo tercio asegurado; queda el último tercio hacia el TP final (" + (TaFp $s.tp3) + ").") }
             if ($s.status -eq 'closed' -and $tok -notlike '*X*') {
                 $head = switch ("$($s.outcome)") { 'SL' { "❌ STOP LOSS ALCANZADO" } 'TP3' { "🏆 TP FINAL ALCANZADO" } 'TP1 + BE' { "➖ CIERRE EN LA ENTRADA tras el TP parcial" } 'TP2 + BE' { "✅ CIERRE EN BENEFICIO tras el TP2 (el resto volvió a la entrada)" } default { "⏱️ CIERRE POR TIEMPO" } }
                 $res = if ($null -ne $s.R) { "Resultado: {0:+0.00;-0.00}R bruto ({1:+0.00;-0.00}R tras comisiones)" -f [double]$s.R, [double]$s.net } else { "" }
                 $m = "$head · $sym $dir`n$res`n`n" + (Explain-GroupOutcome $s) + "`n`nEs un seguimiento de una oportunidad que no se operó: sirve para comprobar si la lectura funciona. No es asesoramiento."
-                $s.closeNote = $tok + "X"; $dirty = $true; Send-Tg $TelegramToken $script:MktChat $m $null
+                $s.closeNote = $tok + "X"; $dirty = $true; Send-GtMsg $priv $m
             }
         }
     }
@@ -96,7 +100,7 @@ function Check-SignalHealth {
     if (-not $doCrypto -and -not $doStocks) { return }
     Set-ReportState "salud" ("{0}|{1}" -f $(if ($doCrypto) { $slot } else { $lastSlot }), $(if ($doStocks) { $day } else { $lastDay }))
     $warned = @((Get-ReportState "saludw") -split ',' | Where-Object { $_ })
-    $cand = @(Read-Signals | Where-Object { $_.status -in 'open', 'pending' -and ($_.strat -in 'ruptura', 'ruptura-mercado', 'seg-grupo' -or $_.manual -eq $true) -and $_.id -notin $warned })
+    $cand = @(Read-Signals | Where-Object { $_.status -in 'open', 'pending' -and ($_.strat -in 'ruptura', 'ruptura-mercado', 'seg-grupo', 'seg-priv' -or $_.manual -eq $true) -and $_.id -notin $warned })
     if (-not $cand.Count) { return }
     $tk = $null
     foreach ($s in $cand) {

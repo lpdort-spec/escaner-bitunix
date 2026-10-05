@@ -22,5 +22,11 @@
     "sym": "BEAMX", "side": 1, "entry": 0.002538, "sl": 0.002449, "tp": 0.0030,
     "margin": 103.9374, "lev": 10, "qty": 407082,
     "note": "Operación real de Luis en Bitunix (captura 2026-10-05): BEAMXUSDT largo x10, margen cruzado; SL y TP propuestos por el bot (SL = 35% del margen; TP parcial 0,002627 y final 0,0030)"
+  },
+  {
+    "id": "manual-btc-20261005",
+    "sym": "BTC", "side": 1, "entry": 85778.5, "sl": 84300, "tp": 88740,
+    "margin": 237.4198, "lev": 20, "qty": 0.0547,
+    "note": "Operación real de Luis en Bitunix (captura 2026-10-05): BTCUSDT largo x20, aislado; SL y TP propuestos por el bot (SL 84.300; TP parcial 87.250 y final 88.740)"
   }
 ]
