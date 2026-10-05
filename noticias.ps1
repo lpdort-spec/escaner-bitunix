@@ -52,11 +52,12 @@ function Get-NewsPool {
 function Get-NewsFlags($title) {
     $t = $title.ToLower(); $f = @()
     if ($t -match 'lawsuit|sues|sued|\bsue\b|trial|court|judge|ruling|indict|charged|charges|settle|probe|investigat|subpoena|fraud|class action|antitrust|\bdoj\b|justice department|fine[sd]?\b|penalt') { $f += '⚖️ legal' }
-    if ($t -match '\bbill\b|\blaw\b|legislat|regulat|\bban(s|ned)?\b|approv|senate|congress|\bmica\b|licen[sc]e|stablecoin|framework|\bsec\b|\bcftc\b|tax rule|crackdown|clarity act|genius act') { $f += '🏛️ regulación' }
+    if ($t -match '\bbill\b|\blaw\b|legislat|regulat|\bban(s|ned)?\b|senate|congress|\bmica\b|stablecoin|framework|\bsec\b|\bcftc\b|tax rule|crackdown|clarity act|genius act') { $f += '🏛️ regulación' }
+    if ($t -match 'approv' -and $t -match '\bsec\b|\betf|\bfda\b|regulator|commission|congress|senate|\bbill\b|exchange|license') { $f += '🏛️ regulación' }
     if ($t -match '\bfed\b|fomc|federal reserve|rate cut|rate hike|interest rate|inflation|\bcpi\b|jobs report|payroll|powell|tariff|treasury yield|recession') { $f += '🏦 macro' }
     if ($t -match 'hack|exploit|breach|bankrupt|insolven|delist|halt(ed)?\b|default|liquidat|outage|collapse|rug pull|stolen|theft|depeg') { $f += '🔒 riesgo' }
     if ($t -match 'earnings|guidance|upgrade|downgrade|partnership|acquisition|acquire|merger|offering|dilution|buyback|etf|listing|launch|deal\b|contract') { $f += '📈 catalizador' }
-    return $f
+    return @($f | Select-Object -Unique)
 }
 function Test-NwMatch($title, $tokens) { foreach ($k in $tokens) { if ($k.Length -lt 2) { continue }; if ($title -cmatch ('(?<![A-Za-z0-9])' + [regex]::Escape($k) + '(?![A-Za-z0-9])')) { return $true } }; return $false }
 function Get-AgeText($when) { $h = ([DateTimeOffset]::UtcNow - $when).TotalHours; if ($h -lt 1) { return "hace <1 h" } elseif ($h -lt 48) { return ("hace {0:N0} h" -f $h) } else { return ("hace {0:N0} d" -f ($h / 24)) } }
@@ -139,7 +140,7 @@ function Get-NewsSection($sym, $name, [bool]$isCrypto, [switch]$Short) {
         else { $L += "Sin titulares recientes de $sym en las fuentes consultadas (puede ser que no haya noticias o que las fuentes no las recojan)." }
     } catch { $L += "No he podido leer titulares del activo ahora." }
     try {
-        $kinds = if ($isCrypto) { 'cripto', 'legal', 'macro' } else { 'macro', 'legal', 'bolsa' }
+        $kinds = if ($isCrypto) { 'cripto', 'legal', 'macro' } else { 'macro', 'legal' }
         $gen = @(Get-NewsPool | Where-Object { $_.kind -in $kinds -and $_.when -gt [DateTimeOffset]::UtcNow.AddHours(-36) } | ForEach-Object { [pscustomobject]@{ i = $_; f = @(Get-NewsFlags $_.title) } } | Where-Object { $_.f -match 'legal|regulación|macro' } | Select-Object -First 3)
         if ($gen.Count) { $L += "Contexto de mercado (regulación, leyes, juicios, Reserva Federal; 36 h):"; foreach ($t in $gen) { $L += ("   • [{0}] {1} — {2}, {3}" -f ($t.f -join ' · '), $t.i.title, $t.i.src, (Get-AgeText $t.i.when)) } }
     } catch {}
