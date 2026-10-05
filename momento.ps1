@@ -115,6 +115,7 @@ function Get-MomentoReport($raw, $mode, $wantSide) {
     if ($other.fx.Count) { $L += ""; $L += ("Factores del {0} (resumen):" -f $other.dir); foreach ($f in ($other.fx | Where-Object { $_ -notlike '· *' } | Select-Object -First 4)) { $L += "   $f" } }
     if ($sentTxt) { $L += ""; $L += "🌡️ $sentTxt" }
     if ($tv) { $L += ""; $L += (Get-TvLines $tv -Short) }
+    try { $L += ""; $L += (Get-NewsSection $s.sym $s.name ($s.src -ne 'yahoo') -Short) } catch {}
     $L += ""; $L += "ℹ️ Cómo leer esto: la puntuación suma factores a favor y resta los en contra con reglas fijas (estructura diaria y 4h, ADX, MACD, RSI, Bollinger, volumen, espacio hasta el obstáculo, barridos de liquidez, TradingView, sentimiento y funding). Es una lectura de CONTEXTO: no está validada en backtest como la táctica de rupturas con retesteo (esa sí lo está y sus señales las publica el bot). Ninguna lectura garantiza resultados. No es asesoramiento financiero."
     return ($L -join "`n")
 }

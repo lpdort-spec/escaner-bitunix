@@ -14,7 +14,7 @@ function Get-ReportState($key) {
 }
 function Set-ReportState($key, $value) {
     $f = Join-Path $PSScriptRoot "last-report.txt"; $lines = @()
-    if (Test-Path $f) { $lines = @(Get-Content $f -Encoding UTF8 | Where-Object { $_ -match '^(daily|weekly|mercado|mercadook|iren|irensnap|vigia|vigiahoy|momact|momc|momm|salud|saludw)=' -and $_ -notmatch ('^' + [regex]::Escape($key) + '=') }) }
+    if (Test-Path $f) { $lines = @(Get-Content $f -Encoding UTF8 | Where-Object { $_ -match '^(daily|weekly|mercado|mercadook|iren|irensnap|vigia|vigiahoy|momact|momc|momm|salud|saludw|macrord|noticiasw|noticiasu)=' -and $_ -notmatch ('^' + [regex]::Escape($key) + '=') }) }
     $lines += "$key=$value"
     Set-Content $f $lines -Encoding UTF8
 }

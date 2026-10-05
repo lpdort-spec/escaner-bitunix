@@ -505,6 +505,9 @@ do {
     try { Run-MomentoStocksIfDue } catch {}
     try { Notify-GroupTracking } catch {}
     try { Check-SignalHealth } catch {}
+    try { Send-MacroRemindersIfDue } catch {}
+    try { Check-NewsOnPositions } catch {}
+    try { Scan-UniverseNews } catch {}
     try { Send-DailyReport } catch {}
     try { Send-WeeklyReport } catch {}
     Write-Host ("{0} pasada completada" -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor DarkGray
