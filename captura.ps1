@@ -113,8 +113,20 @@ function Format-CapturaAnalysis($p, [bool]$register, [string]$who) {
     if ($atr -gt 0) { $L += ("   Volatilidad 4h (ATR): {0} = {1:N1}% del precio" -f (TaFp $atr), ($atr / $px * 100)) }
     # estructura reciente en 1h: extremo de las últimas 48 velas
     $recent = $null
-    try { $k = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=${sym}USDT&interval=1h&limit=60" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $k = @($k[0..($k.Count - 2)] | Select-Object -Last 48)
+    $ext = $null
+    try { $k = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=${sym}USDT&interval=1h&limit=80" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $k = @($k[0..($k.Count - 2)])
+        # extensión en 1h: Bollinger(20,2) y RSI(14) con las velas cerradas; fuera de banda 2 de las últimas 3 velas o RSI extremo = movimiento estirado
+        $cl1 = @($k | ForEach-Object { [double]$_.close }); $nOut = 0; $bbm = $null
+        for ($q = 1; $q -le 3; $q++) { $sub = @($cl1[0..($cl1.Count - $q)]); $x20 = @($sub | Select-Object -Last 20); $mm = ($x20 | Measure-Object -Average).Average; $sd = [Math]::Sqrt((($x20 | ForEach-Object { ($_ - $mm) * ($_ - $mm) }) | Measure-Object -Sum).Sum / 20); if ($q -eq 1) { $bbm = $mm; $bbu = $mm + 2 * $sd; $bbl = $mm - 2 * $sd }
+            if (($sg -eq 1 -and $sub[-1] -gt $mm + 2 * $sd) -or ($sg -eq -1 -and $sub[-1] -lt $mm - 2 * $sd)) { $nOut++ } }
+        $gg = 0.0; $ll2 = 0.0; for ($q = 1; $q -le 14; $q++) { $d = $cl1[$q] - $cl1[$q - 1]; if ($d -gt 0) { $gg += $d } else { $ll2 -= $d } }; $gg /= 14; $ll2 /= 14
+        for ($q = 15; $q -lt $cl1.Count; $q++) { $d = $cl1[$q] - $cl1[$q - 1]; $gg = ($gg * 13 + [Math]::Max($d, 0)) / 14; $ll2 = ($ll2 * 13 + [Math]::Max(-$d, 0)) / 14 }
+        $rsi1 = if ($ll2 -eq 0) { 100 } else { 100 - 100 / (1 + $gg / $ll2) }
+        $stretched = ($nOut -ge 2) -or ($sg -eq 1 -and $rsi1 -ge 75) -or ($sg -eq -1 -and $rsi1 -le 25)
+        $ext = @{ nOut = $nOut; rsi = $rsi1; mid = $bbm; up = $bbu; lo = $bbl; stretched = $stretched }
+        $k = @($k | Select-Object -Last 48)
         $recent = if ($sg -eq 1) { ($k | ForEach-Object { [double]$_.high } | Measure-Object -Maximum).Maximum } else { ($k | ForEach-Object { [double]$_.low } | Measure-Object -Minimum).Minimum } } catch {}
+    if ($ext) { $L += ("   Bollinger 1h: media {0} · banda {1} {2} · RSI 1h {3:N0} · {4} de las últimas 3 velas cerraron fuera de la banda{5}" -f (TaFp $ext.mid), $(if ($sg -eq 1) { "sup." } else { "inf." }), (TaFp $(if ($sg -eq 1) { $ext.up } else { $ext.lo })), $ext.rsi, $ext.nOut, $(if ($ext.stretched) { " ⚠️ MOVIMIENTO ESTIRADO: lo habitual es volver hacia la media de 1h (" + (TaFp $ext.mid) + "); no persigas ni añadas aquí" } else { "" })) }
     # veredicto con reglas fijas
     $L += ""; $verdict = "MANTENER"; $why = @()
     if (-not $sl) { $verdict = "PROTEGER YA"; $why += "no tiene stop: una posición sin SL puede liquidarse. Pon uno ahora (sugerido {0})" -f (TaFp ($en - $sg * [Math]::Max(1.2 * $atr, 0.02 * $en))) }
@@ -125,6 +137,7 @@ function Format-CapturaAnalysis($p, [bool]$register, [string]$who) {
         if ($atr -gt 0 -and $dSl -lt 0.8 * $atr) { $L += ("⚠️ El SL queda a solo {0:N1} ATR del precio: es fácil que el ruido normal lo toque." -f ($dSl / $atr)) }
         if ($sg * ($px - $en) / $R -ge 1.0) { $verdict = "PROTEGER"; $why += "ya vas a +{0:N1}R: cierra un tercio y mueve el SL a tu entrada ({1})" -f ($sg * ($px - $en) / $R), (TaFp $en) }
     }
+    if ($ext -and $ext.stretched -and $verdict -eq "MANTENER") { if ($pct -gt 0) { $verdict = "PROTEGER"; $why += "el activo está estirado en 1h y vas en beneficio: toma un parcial ya y sube el SL a la entrada" } else { $verdict = "VIGILAR"; $why += "el activo está estirado en 1h: riesgo de retroceso hacia la media; no añadas posición" } }
     if ($null -ne $own -and $own -le 0 -and $opp -ge 6) { $verdict = "CERRAR"; $why += "la lectura del activo se ha dado la vuelta en contra" }
     elseif ($null -ne $own -and $own -lt 4 -and $verdict -eq "MANTENER") { $verdict = "VIGILAR"; $why += "la puntuación es floja ($own); si pierde más, valora cerrar" }
     if ($mg -and $mg -gt 200) { $L += ("⚠️ El margen ({0:N0} USDT) supera tu límite de 200 USDT." -f $mg) }
