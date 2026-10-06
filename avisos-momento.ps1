@@ -57,7 +57,19 @@ function Get-OrderLevels($side, $plan, $kind) {      # entrada, apalancamiento o
 }
 function Build-MomAlert($kind, $sym, $side, $score, $plan = $null, [switch]$Priv) {
     $lv = Get-OrderLevels $side $plan $kind; if (-not $lv) { return $null }
-    return (Format-CompactSignal $lv.sg ($(if ($kind -eq 'cripto') { "$sym/USDT" } else { "$sym" })) $score $lv.entry ([bool]$plan.pullback) $lv.lev $lv.sl $lv.t1 $lv.t2 $lv.t3 $kind)
+    return (Format-CompactSignal $lv.sg ($(if ($kind -eq 'cripto') { "$sym/USDT" } else { "$sym" })) $score $lv.entry ([bool]$plan.pullback) $lv.lev $lv.sl $lv.t1 $lv.t2 $lv.t3 $kind $(if ($kind -eq 'cripto') { '4h' } else { '1d' }))
+}
+function Register-MomSignal($kind, $sym, $lv, $plan) {      # cada aviso emitido queda registrado: se vigila (cambios de lectura, nuevos SL/TP) igual que las rupturas
+    try {
+        $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $last = [long]0
+        if ($kind -eq 'cripto') { $k = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=${sym}USDT&interval=4h&limit=3" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $last = [long]$k[$k.Count - 1].time }
+        else { $b = Get-MktBars $sym; if ($b) { $last = [long]$b.t[$b.n - 1] } }
+        Add-SignalRecord ([ordered]@{
+            id = "mom-$sym-$($lv.sg)-$now"; time = $now; sym = $(if ($kind -eq 'cripto') { "${sym}USDT" } else { $sym }); src = $(if ($kind -eq 'cripto') { $null } else { 'yahoo' }); tf = $(if ($kind -eq 'cripto') { '4h' } else { '1d' }); strat = 'aviso-momento'; side = $lv.sg
+            entryType = $(if ($plan.pullback) { 'limit' } else { 'market' }); entry = $lv.entry; sl = $lv.sl; tp1 = $lv.t1; tp2 = $lv.t2; tp3 = $lv.t3; riskAbs = [Math]::Abs($lv.entry - $lv.sl); slPct = $lv.slPct; lev = $lv.lev
+            status = $(if ($plan.pullback) { 'pending' } else { 'open' }); stage = 0; realized = 0.0; age = 0; expiry = 6; lastLabel = $last; lab0 = $last; cost = $(if ($kind -eq 'cripto') { 0.0015 } else { 0.0010 }); outcome = $null; R = $null; net = $null
+        })
+    } catch {}
 }
 # Procesa una lista de elementos; devuelve nº de avisos enviados. -Dry: solo muestra puntuaciones, no envía ni guarda estado.
 function Invoke-MomItems($kind, $items, [switch]$Dry) {
@@ -79,6 +91,7 @@ function Invoke-MomItems($kind, $items, [switch]$Dry) {
                     $msg = Build-MomAlert $kind $sym $side $score $plan; if (-not $msg) { continue }
                     if ($kind -eq 'cripto') { Send-ToSignalChats $msg }
                     if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $msg $null }
+                    try { Register-MomSignal $kind $sym (Get-OrderLevels $side $plan $kind) $plan } catch {}
                     $act += $key; $sent++; $script:MomSent++
                 } elseif ($score -lt ($thr - 3) -and $key -in $act) {
                     $act = @($act | Where-Object { $_ -ne $key })

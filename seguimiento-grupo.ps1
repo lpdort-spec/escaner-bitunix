@@ -114,7 +114,7 @@ function Check-SignalHealth {
     if (-not $doCrypto -and -not $doStocks) { return }
     Set-ReportState "salud" ("{0}|{1}" -f $(if ($doCrypto) { $slot } else { $lastSlot }), $(if ($doStocks) { $day } else { $lastDay }))
     $warned = @((Get-ReportState "saludw") -split ',' | Where-Object { $_ })
-    $cand = @(Read-Signals | Where-Object { $_.status -in 'open', 'pending' -and ($_.strat -in 'ruptura', 'ruptura-mercado', 'seg-grupo', 'seg-priv' -or $_.manual -eq $true) -and $_.id -notin $warned })
+    $cand = @(Read-Signals | Where-Object { $_.status -in 'open', 'pending' -and ($_.strat -in 'ruptura', 'ruptura-mercado', 'seg-grupo', 'seg-priv', 'aviso-momento' -or $_.manual -eq $true) -and $_.id -notin $warned })
     if (-not $cand.Count) { return }
     $tk = $null
     foreach ($s in $cand) {
@@ -132,7 +132,7 @@ function Check-SignalHealth {
             $m = ("⚠️ CAMBIO SIGNIFICATIVO · {0} {1} · valora CERRAR o proteger la operación`nLa lectura del activo se ha dado la vuelta: para esta dirección puntúa {2} y para la contraria {3}.`nPrecio actual {4} frente a entrada {5} ({6:+0.0;-0.0}% sobre la entrada) · SL {7}" -f $sym, $(if ($sg -eq 1) { 'LARGO' } else { 'CORTO' }), $own.score, $opp.score, (TaFp $px), (TaFp ([double]$s.entry)), $pnl, (TaFp ([double]$s.sl)))
             if ($neg.Count) { $m += "`nFactores en contra ahora:`n" + (($neg | ForEach-Object { "   $_" }) -join "`n") }
             $m += "`nEl bot no cierra nada: decides tú. Regla del aviso: el lado de la operación puntúa 0 o menos y el contrario 6 o más."
-            $toPriv = (-not $isStock) -and ($s.strat -ne 'seg-grupo'); $toGroup = ($isStock) -or ($s.strat -eq 'seg-grupo') -or ($s.strat -eq 'ruptura' -and $s.tf -eq '4h')
+            $toPriv = (-not $isStock) -and ($s.strat -ne 'seg-grupo'); $toGroup = ($isStock) -or ($s.strat -eq 'seg-grupo') -or ($s.strat -eq 'aviso-momento') -or ($s.strat -eq 'ruptura' -and $s.tf -eq '4h')
             if ($s.manual -eq $true) { $toPriv = $true; $toGroup = $false }
             if ($toPriv) { Send-ToSignalChats $m }
             if ($toGroup -and $script:MktChat) { Send-Tg $TelegramToken $script:MktChat $m $null }
@@ -143,21 +143,32 @@ function Check-SignalHealth {
     Set-ReportState "saludw" ((@($warned | Select-Object -Last 80)) -join ',')
 }
 
-# ---------- Revisión de gestión de TUS operaciones abiertas (strat seg-priv): SOLO al chat privado ----------
-# Cada vela de 4h se mira si hay un soporte/resistencia nuevo que justifique SUBIR el SL (largos) o BAJARLO (cortos), o una resistencia/soporte antes del TP final que aconseje tomar beneficios antes.
-# Un aviso por cambio de nivel. El bot no modifica ninguna orden: lo haces tú en Bitunix.
+# ---------- Revisión de gestión de TODAS las órdenes emitidas y abiertas ----------
+# Cada vela de 4h se mira si hay un soporte/resistencia nuevo que justifique SUBIR el SL (largos) o BAJARLO (cortos), una resistencia/soporte antes del TP final que aconseje tomar beneficios antes,
+# o noticias de riesgo recientes que aconsejen proteger la orden. Un aviso por cambio de nivel. Los destinos son los mismos donde se emitió la orden (tu operación real: solo chat privado).
+# El bot no modifica ninguna orden: lo haces tú.
 $script:RpSlot = 0
+function Get-RecDest($s) {
+    $isStock = ($s.src -eq 'yahoo')
+    if ($s.strat -eq 'seg-priv' -or $s.manual -eq $true) { return @{ priv = $true; group = $false } }
+    if ($s.strat -in 'seg-grupo', 'ruptura-mercado') { return @{ priv = $false; group = $true } }
+    if ($s.strat -eq 'aviso-momento') { if ($isStock) { return @{ priv = $false; group = $true } } else { return @{ priv = $true; group = $true } } }
+    if ($s.strat -eq 'ruptura') { return @{ priv = $true; group = ($s.tf -eq '4h') } }
+    return @{ priv = $false; group = $false }
+}
 function Review-OpenPositions {
     if (-not $TelegramToken) { return }
     $slot = [long][Math]::Floor([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() / 14400); if ($slot -eq $script:RpSlot) { return }; $script:RpSlot = $slot
     $mem = @{}; foreach ($kv in ((Get-ReportState "ajustes") -split ',' | Where-Object { $_ -match '=' })) { $p = $kv -split '=', 2; $mem[$p[0]] = $p[1] }
     $tk = $null; $chg = $false
-    foreach ($s in @(Read-Signals | Where-Object { $_.strat -eq 'seg-priv' -and $_.status -eq 'open' })) {
+    foreach ($s in @(Read-Signals | Where-Object { $_.status -eq 'open' -and $_.strat -in 'seg-priv', 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo' })) {
         try {
-            $sym = $s.sym -replace 'USDT$', ''; $sg = [int]$s.side
-            if (-not $tk) { $tk = @((Invoke-RestMethod "$($script:TrkBase)/tickers").data) }; $row = $tk | Where-Object symbol -eq $s.sym | Select-Object -First 1; if (-not $row) { continue }; $px = [double]$row.lastPrice
-            $cd = Get-MomentoCd @{ src = 'bitunix'; sym = $sym } '4h'; if (-not $cd) { continue }; $a = Analyze-TF $cd '4h' 100; $atr = [double]$a.atr; if ($atr -le 0) { continue }
-            $en = [double]$s.entry; $slEff = if ([int]$s.stage -ge 1) { $en } else { [double]$s.sl }; $tpF = [double]$s.tp3; $msgs = @()
+            $dest = Get-RecDest $s; if (-not ($dest.priv -or $dest.group)) { continue }
+            $isStock = ($s.src -eq 'yahoo'); $sym = $s.sym -replace 'USDT$', ''; $sg = [int]$s.side
+            if ($isStock) { $ss = Get-YahooSeries $s.sym; if (-not $ss) { continue }; $px = [double]$ss.price; $msrc = @{ src = 'yahoo'; sym = $s.sym; exch = $ss.exch } }
+            else { if (-not $tk) { $tk = @((Invoke-RestMethod "$($script:TrkBase)/tickers").data) }; $row = $tk | Where-Object symbol -eq $s.sym | Select-Object -First 1; if (-not $row) { continue }; $px = [double]$row.lastPrice; $msrc = @{ src = 'bitunix'; sym = $sym } }
+            $cd = Get-MomentoCd $msrc '4h'; if (-not $cd) { continue }; $a = Analyze-TF $cd '4h' 100; $atr = [double]$a.atr; if ($atr -le 0) { continue }
+            $en = [double]$s.entry; $slEff = if ([int]$s.stage -ge 1) { $en } else { [double]$s.sl }; $tpF = [double]$s.tp3; $msgs = @(); $near = $null
             $lvls = if ($sg -eq 1) { @($a.sup | ForEach-Object { [double]$_.p } | Where-Object { $_ -lt $px - 0.5 * $atr }) } else { @($a.res | ForEach-Object { [double]$_.p } | Where-Object { $_ -gt $px + 0.5 * $atr }) }
             if ($lvls.Count) {
                 $near = if ($sg -eq 1) { ($lvls | Measure-Object -Maximum).Maximum } else { ($lvls | Measure-Object -Minimum).Minimum }; $newSl = $near - $sg * 0.3 * $atr
@@ -170,20 +181,24 @@ function Review-OpenPositions {
                 $ob = if ($sg -eq 1) { ($obs | Measure-Object -Minimum).Minimum } else { ($obs | Measure-Object -Maximum).Maximum }; $lastO = if ($mem.ContainsKey("$($s.id)|tp")) { [double]$mem["$($s.id)|tp"] } else { $null }
                 if ($null -eq $lastO -or [Math]::Abs($ob - $lastO) -gt 0.5 * $atr) { $msgs += ("🎯 Ajuste de TP: hay {0} en {1}, antes de tu TP final ({2}). Valora tomar beneficios allí o bajar el TP un poco antes del nivel." -f $(if ($sg -eq 1) { "una resistencia" } else { "un soporte" }), (TaFp $ob), (TaFp $tpF)); $mem["$($s.id)|tp"] = [string]::Format([Globalization.CultureInfo]::InvariantCulture, "{0}", $ob); $chg = $true }
             }
-            # noticias de riesgo recientes sobre el activo (legal, regulación, riesgo): se tienen en cuenta SIN reenviar la noticia; se propone proteger la operación
-            $nr = @(); try { foreach ($nw in @(Get-AssetNews $sym $null $true 12)) { $nr += @(Get-NewsFlags $nw.title | Where-Object { $_ -match 'legal|regulación|riesgo' }) } } catch {}
+            # noticias de riesgo recientes sobre el activo (legal, regulación, riesgo): se tienen en cuenta y se propone proteger la orden
+            $nr = @(); try { foreach ($nw in @(Get-AssetNews $sym $null (-not $isStock) 12)) { $nr += @(Get-NewsFlags $nw.title | Where-Object { $_ -match 'legal|regulación|riesgo' }) } } catch {}
             $nr = @($nr | Select-Object -Unique)
             if ($nr.Count) {
                 $kn = "$($s.id)|news|$((Get-Date).ToString('yyyyMMdd'))"
                 if (-not $mem.ContainsKey($kn)) {
                     $prot = if ($sg * ($px - $en) -gt 0.5 * $atr) { $en + $sg * 0.1 * $atr } elseif ($lvls.Count) { $near - $sg * 0.3 * $atr } else { $slEff }
                     $improve = if ($sg -eq 1) { $prot -gt $slEff } else { $prot -lt $slEff }
-                    $msgs += ("📰 Tengo en cuenta noticias recientes de riesgo sobre {0} ({1}; no te las reenvío). Por prudencia: {2} TP final sin cambios ({3}) y, si ya estás en beneficio, valora tomar parcial ahora." -f $sym, ($nr -join ' · '), $(if ($improve) { "SL propuesto " + (TaFp $prot) + " (antes " + (TaFp $slEff) + ");" } else { "mantén el SL (" + (TaFp $slEff) + ") sin aflojarlo y no añadas posición;" }), (TaFp $tpF))
+                    $msgs += ("📰 Hay noticias recientes de riesgo sobre {0} ({1}). Por prudencia: {2} TP final sin cambios ({3}) y, si ya estás en beneficio, valora tomar parcial ahora." -f $sym, ($nr -join ' · '), $(if ($improve) { "SL propuesto " + (TaFp $prot) + " (antes " + (TaFp $slEff) + ");" } else { "mantén el SL (" + (TaFp $slEff) + ") sin aflojarlo y no añadas posición;" }), (TaFp $tpF))
                     $mem[$kn] = "1"; $chg = $true
                 }
             }
-            if ($msgs.Count) { Send-ToSignalChats (("📌 GESTIÓN DE TU OPERACIÓN · {0} {1} · precio {2} (entrada {3})`n" -f $sym, $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), (TaFp $px), (TaFp $en)) + ($msgs -join "`n") + "`nEl bot no modifica ninguna orden: decides tú. Son sugerencias de estructura de 4h, no garantías.") }
+            if ($msgs.Count) {
+                $own = if ($s.strat -eq 'seg-priv') { "TU OPERACIÓN" } else { "LA ORDEN EMITIDA" }
+                $txt = (("📌 GESTIÓN DE {0} · {1} {2} · precio {3} (entrada {4})`n" -f $own, $sym, $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), (TaFp $px), (TaFp $en)) + ($msgs -join "`n") + "`nEl bot no modifica ninguna orden: decides tú. Son sugerencias de estructura de 4h, no garantías.")
+                if ($dest.priv) { Send-ToSignalChats $txt }; if ($dest.group -and $script:MktChat) { Send-Tg $TelegramToken $script:MktChat $txt $null }
+            }
         } catch {}
     }
-    if ($chg) { Set-ReportState "ajustes" ((@($mem.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) | Select-Object -Last 40) -join ',') }
+    if ($chg) { Set-ReportState "ajustes" ((@($mem.GetEnumerator() | ForEach-Object { "$($_.Key)=$($_.Value)" }) | Select-Object -Last 60) -join ',') }
 }

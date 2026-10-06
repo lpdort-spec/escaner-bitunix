@@ -151,7 +151,7 @@ function Get-MarketSection {
 
 # ---------- Disciplina: racha y pérdida acumulada de la semana (aviso, nunca una orden) ----------
 function Get-DisciplineLines {
-    $cl = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' -and $_.strat -ne 'seg-grupo' -and $_.strat -ne 'seg-priv' -and $_.strat -ne 'momento-obs' -and $_.status -eq 'closed' -and $_.closedAt } | Sort-Object { [long]$_.closedAt })
+    $cl = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' -and $_.strat -ne 'seg-grupo' -and $_.strat -ne 'seg-priv' -and $_.strat -ne 'momento-obs' -and $_.strat -ne 'aviso-momento' -and $_.status -eq 'closed' -and $_.closedAt } | Sort-Object { [long]$_.closedAt })
     $L = @("", "🛡️ DISCIPLINA Y RIESGO")
     if ($cl.Count -eq 0) { $L += "• Aún no hay señales cerradas. Recuerda el plan: cada operación debe acabar en pequeño beneficio, gran beneficio, pequeña pérdida o breakeven; nunca en una gran pérdida (SL siempre puesto en Bitunix y ≤35% del margen)."; return $L }
     $streak = 0; $dirWin = $null
@@ -167,7 +167,7 @@ function Get-DisciplineLines {
 }
 # ---------- Informe diario sencillo ----------
 function Get-DailyReport {
-    $now = Get-MadridNow; $all = @(Read-Signals); $auto = @($all | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' -and $_.strat -ne 'seg-grupo' -and $_.strat -ne 'seg-priv' -and $_.strat -ne 'momento-obs' })
+    $now = Get-MadridNow; $all = @(Read-Signals); $auto = @($all | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' -and $_.strat -ne 'seg-grupo' -and $_.strat -ne 'seg-priv' -and $_.strat -ne 'momento-obs' -and $_.strat -ne 'aviso-momento' })
     $since = [DateTimeOffset]::UtcNow.AddHours(-24).ToUnixTimeSeconds()
     $new = @($auto | Where-Object { [long]$_.time -ge $since }).Count
     $clNew = @($auto | Where-Object { $_.status -eq 'closed' -and $_.closedAt -and [long]$_.closedAt -ge $since }).Count
