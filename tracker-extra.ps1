@@ -165,8 +165,56 @@ function Get-DisciplineLines {
     $L += "• Recordatorio: ninguna operación debería acabar en una gran pérdida; SL siempre puesto en Bitunix, parcial en TP1 y SL a la entrada tras TP1."
     return $L
 }
+# ---------- Resumen COMPACTO (desde 2026-10-06): tus operaciones abiertas/tomadas y cómo van + señales en seguimiento (van bien / mal / pendientes) ----------
+function Get-LivePxMap($recs) {
+    $m = @{}; $tk = $null
+    foreach ($r in $recs) { $k = "$($r.sym)"; if ($m.ContainsKey($k)) { continue }
+        try { if ($r.src -eq 'yahoo') { if (Get-Command Get-YahooSeries -ErrorAction SilentlyContinue) { $y = Get-YahooSeries $k; if ($y) { $m[$k] = [double]$y.price } } }
+              else { if (-not $tk) { $tk = @((Invoke-RestMethod "$($script:TrkBase)/tickers" -TimeoutSec 20).data) }; $row = $tk | Where-Object symbol -eq $k | Select-Object -First 1; if ($row) { $m[$k] = [double]$row.lastPrice } } } catch {} }
+    return $m
+}
+function Format-SummaryLine($r, $px, [bool]$mine) {
+    $sg = [int]$r.side; $sym = "$($r.sym)" -replace 'USDT$', ''; $dir = if ($sg -eq 1) { "LARGO" } else { "CORTO" }; $en = [double]$r.entry; $lev = if ($r.lev -and [double]$r.lev -gt 1) { [double]$r.lev } else { $null }
+    $lv = if ($lev -and $mine) { " x{0:N0}" -f $lev } else { "" }
+    if ($r.status -eq 'closed') { $res = if ($null -ne $r.net) { "{0:+0.0;-0.0}R" -f [double]$r.net } else { "" }; $ic = if ($null -ne $r.net -and [double]$r.net -gt 0) { "🟢" } elseif ($null -ne $r.net -and [double]$r.net -lt -0.05) { "🔴" } else { "⚪" }
+        return ("{0} {1} {2}{3} · cerrada: {4} {5}" -f $ic, $sym, $dir, $lv, $(if ($r.outcome) { "$($r.outcome)" } else { "" }), $res).Trim() }
+    if ($r.status -eq 'pending') { return ("⏳ {0} {1} · orden limit pendiente de ejecutarse en {2}" -f $sym, $dir, (TaFp $en)) }
+    if (-not $px) { return ("⚪ {0} {1}{2} · entrada {3} (sin precio ahora)" -f $sym, $dir, $lv, (TaFp $en)) }
+    $pct = $sg * ($px / $en - 1) * 100; $rMult = if ($r.riskAbs -and [double]$r.riskAbs -gt 0) { $sg * ($px - $en) / [double]$r.riskAbs } else { $null }      # (no llamar $R: PowerShell no distingue $r de $R)
+    $st = [int]$r.stage; $ic = if ($st -ge 1 -or ($null -ne $rMult -and $rMult -ge 0.3)) { "🟢" } elseif ($null -ne $rMult -and $rMult -le -0.5) { "🔴" } else { "🟡" }
+    $extra = if ($st -ge 2) { " · TP2 alcanzado" } elseif ($st -ge 1) { " · TP1 alcanzado, SL en la entrada" } elseif ($null -ne $rMult -and $rMult -le -0.8) { " · ⚠️ cerca del SL" } else { "" }
+    $mg = if ($lev -and $mine) { " ({0:+0;-0}% del margen)" -f ($pct * $lev) } else { "" }
+    return ("{0} {1} {2}{3} · entrada {4} → {5} · {6:+0.0;-0.0}%{7}{8}" -f $ic, $sym, $dir, $lv, (TaFp $en), (TaFp $px), $pct, $mg, $extra)
+}
+function Get-CompactSummary {
+    $now = Get-MadridNow; $all = @(Read-Signals); $since = [DateTimeOffset]::UtcNow.AddHours(-24).ToUnixTimeSeconds()
+    $mineOpen = @($all | Where-Object { ($_.strat -eq 'tomada' -or $_.manual -eq $true) -and $_.status -in 'open', 'pending' })
+    $mineOpen = @($mineOpen | Group-Object sym | ForEach-Object { $_.Group | Sort-Object { if ($_.strat -eq 'tomada') { 0 } else { 1 } } | Select-Object -First 1 })      # una línea por moneda (si hay registro vivo y manual, el vivo)
+    $mineClosed = @($all | Where-Object { ($_.strat -eq 'tomada' -or $_.manual -eq $true) -and $_.status -eq 'closed' -and $_.closedAt -and [long]$_.closedAt -ge $since -and "$($_.outcome)" -notlike 'sustituida*' } | Group-Object sym | ForEach-Object { $_.Group | Select-Object -First 1 })
+    $trk = @($all | Where-Object { $_.strat -in 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'seg-priv' -and $_.manual -ne $true -and ($_.status -in 'open', 'pending' -or ($_.status -eq 'closed' -and $_.closedAt -and [long]$_.closedAt -ge $since)) } | Sort-Object { [long]$_.time } -Descending)
+    $px = Get-LivePxMap (@($mineOpen) + @($trk | Where-Object { $_.status -eq 'open' }))
+    $L = @(("📊 RESUMEN · {0:dd/MM HH:mm} (hora de España)" -f $now), "")
+    $L += "👤 TUS OPERACIONES"
+    if (-not $mineOpen.Count -and -not $mineClosed.Count) { $L += "   Sin operaciones abiertas ni cerradas en las últimas 24 h." }
+    foreach ($r in ($mineOpen | Select-Object -First 10)) { $L += ("   " + (Format-SummaryLine $r $px["$($r.sym)"] $true)) }
+    foreach ($r in ($mineClosed | Select-Object -First 8)) { $L += ("   " + (Format-SummaryLine $r $null $true)) }
+    $L += ""
+    $open = @($trk | Where-Object { $_.status -eq 'open' }); $good = 0; $bad = 0; $mid = 0
+    foreach ($r in $open) { $p = $px["$($r.sym)"]; if ($p -and $r.riskAbs) { $rMult = [int]$r.side * ($p - [double]$r.entry) / [double]$r.riskAbs; if ([int]$r.stage -ge 1 -or $rMult -ge 0.3) { $good++ } elseif ($rMult -le -0.5) { $bad++ } else { $mid++ } } else { $mid++ } }
+    $pend = @($trk | Where-Object { $_.status -eq 'pending' }).Count
+    $L += ("📡 EN SEGUIMIENTO (señales que no has tomado) · {0} 🟢 van bien · {1} 🔴 van mal · {2} 🟡 sin definir · {3} ⏳ pendientes" -f $good, $bad, $mid, $pend)
+    if (-not $trk.Count) { $L += "   Ninguna señal en seguimiento ahora mismo." }
+    foreach ($r in ($trk | Select-Object -First 12)) { $L += ("   " + (Format-SummaryLine $r $px["$($r.sym)"] $false)) }
+    if ($trk.Count -gt 12) { $L += ("   … y {0} más." -f ($trk.Count - 12)) }
+    $L += ""; $L += "Detalle y estadísticas: /semanal · Resultados descontando comisiones."
+    return $L
+}
 # ---------- Informe diario sencillo ----------
 function Get-DailyReport {
+    try { return ((Get-CompactSummary) -join "`n") } catch { }      # resumen compacto; si falla, se usa el informe largo de siempre
+    return (Get-DailyReportLong)
+}
+function Get-DailyReportLong {
     $now = Get-MadridNow; $all = @(Read-Signals); $auto = @($all | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' -and $_.strat -ne 'seg-grupo' -and $_.strat -ne 'seg-priv' -and $_.strat -ne 'momento-obs' -and $_.strat -ne 'aviso-momento' -and $_.strat -ne 'tomada' -and $_.strat -ne 'arranque-obs' })
     $since = [DateTimeOffset]::UtcNow.AddHours(-24).ToUnixTimeSeconds()
     $new = @($auto | Where-Object { [long]$_.time -ge $since }).Count
