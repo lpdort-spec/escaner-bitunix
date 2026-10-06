@@ -47,18 +47,18 @@ function Build-OrderCard($side, $plan) {
     $L += "El bot no abre ni cierra operaciones: pon estas órdenes tú en Bitunix (botón TP/SL de la posición)."
     return ($L -join "`n")
 }
-function Build-MomAlert($kind, $sym, $side, $score, $plan = $null, [switch]$Priv) {
-    $mode = if ($kind -eq 'cripto') { 'cripto' } else { 'accion' }
-    $rep = Get-MomentoReport $sym $mode $(if ($side -eq 'L') { 'largo' } else { 'corto' })
-    if ($rep -like 'No he podido*' -or $rep -like 'Tengo el precio*') { return $null }
-    $dirU = if ($side -eq 'L') { "LARGO" } else { "CORTO" }
-    $h = "🔔 AVISO DE BUEN MOMENTO · $dirU · $sym`n(Revisión automática con las velas cerradas · puntuación $score; umbral de aviso $(Get-MomCfg 'umbralMomento' 7))"
-    if ($kind -ne 'cripto') { $h += "`nEn opciones: LARGO ≈ call y CORTO ≈ put. Este análisis no valora la prima, el vencimiento ni la volatilidad implícita de la opción: solo la dirección del subyacente." }
-    $card = if ($Priv) { Build-OrderCard $side $plan } else { $null }
-    if ($card) { $h += "`n`n" + $card }
-    return $h + "`n`n" + $rep
+function Get-OrderLevels($side, $plan, $kind) {      # entrada, apalancamiento orientativo, SL y tres objetivos (el final no pasa del siguiente obstáculo)
+    if (-not $plan) { return $null }
+    $sg = if ($side -eq 'L') { 1 } else { -1 }; $en = [double]$plan.entry; $sl = [double]$plan.sl; $R = [Math]::Abs($en - $sl); if ($R -le 0) { return $null }
+    $slPct = $R / $en * 100; $t1 = $en + $sg * $R; $t2 = $en + $sg * 2 * $R; $t3 = $en + $sg * 3 * $R
+    if ($plan.ob) { $ob = [double]$plan.ob
+        if ($sg * ($ob - $en) -gt 1.05 * $R) { $fin = $ob - $sg * 0.1 * $R; if ($sg * ($t3 - $fin) -gt 0) { $t3 = $fin }; if ($sg * ($t2 - $t3) -ge 0) { $t2 = ($t1 + $t3) / 2 } } }
+    return @{ sg = $sg; entry = $en; sl = $sl; t1 = $t1; t2 = $t2; t3 = $t3; slPct = $slPct; lev = (Get-SuggestedLev $slPct $kind) }
 }
-
+function Build-MomAlert($kind, $sym, $side, $score, $plan = $null, [switch]$Priv) {
+    $lv = Get-OrderLevels $side $plan $kind; if (-not $lv) { return $null }
+    return (Format-CompactSignal $lv.sg ($(if ($kind -eq 'cripto') { "$sym/USDT" } else { "$sym" })) $score $lv.entry ([bool]$plan.pullback) $lv.lev $lv.sl $lv.t1 $lv.t2 $lv.t3 $kind)
+}
 # Procesa una lista de elementos; devuelve nº de avisos enviados. -Dry: solo muestra puntuaciones, no envía ni guarda estado.
 function Invoke-MomItems($kind, $items, [switch]$Dry) {
     $thr = [int](Get-MomCfg 'umbralMomento' 7); $act = @(Get-MomAct); $sent = 0; $cap = 8
@@ -77,7 +77,7 @@ function Invoke-MomItems($kind, $items, [switch]$Dry) {
                     if ($script:MomSent -ge $cap) { continue }
                     $plan = if ($side -eq 'L') { $sc.lg.plan } else { $sc.st.plan }
                     $msg = Build-MomAlert $kind $sym $side $score $plan; if (-not $msg) { continue }
-                    if ($kind -eq 'cripto') { Send-ToSignalChats (Build-MomAlert $kind $sym $side $score $plan -Priv) }
+                    if ($kind -eq 'cripto') { Send-ToSignalChats $msg }
                     if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $msg $null }
                     $act += $key; $sent++; $script:MomSent++
                 } elseif ($score -lt ($thr - 3) -and $key -in $act) {

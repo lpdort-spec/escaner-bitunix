@@ -38,6 +38,7 @@ if (Test-Path (Join-Path $PSScriptRoot "analisis-tecnico.ps1")) { . (Join-Path $
 $hasCmds = $false
 if (Test-Path (Join-Path $PSScriptRoot "commands.ps1")) { . (Join-Path $PSScriptRoot "commands.ps1"); $hasCmds = $true }
 if (Test-Path (Join-Path $PSScriptRoot "scanner-mercado.ps1")) { . (Join-Path $PSScriptRoot "scanner-mercado.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "senal-compacta.ps1")) { . (Join-Path $PSScriptRoot "senal-compacta.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "vigilancia.ps1")) { . (Join-Path $PSScriptRoot "vigilancia.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "avisos-momento.ps1")) { . (Join-Path $PSScriptRoot "avisos-momento.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "seguimiento-grupo.ps1")) { . (Join-Path $PSScriptRoot "seguimiento-grupo.ps1") }
@@ -345,52 +346,12 @@ function Scan($iv) {
             $liqPx = $entry * (1 - $sgn * (1 / $lev - 0.003)); $liqDist = [Math]::Abs($entry - $liqPx) / $entry * 100
             $slShare = $slPct / $liqDist * 100
             $rbTxt = ("Riesgo/beneficio: TP1 1:1 · TP2 1:2 · TP3 1:3 · plan completo 1:{0:N1}`nAcierto mínimo para no perder (comisiones incl.): {1:N0}% si el objetivo es TP2 · {2:N0}% con el plan completo`nLiquidación aprox.: {3} ({4:N1}% desde la entrada); el SL queda al {5:N0}% de ese camino {6}" -f $rPlan, $pBe2, $pBeP, (Fmt $liqPx), $liqDist, $slShare, $(if ($slShare -le 50) { "✅" } else { "⚠️" }))
-            $msg = ("{0} {1}/USDT {2} {3}  ({4} · {5}){6}`n" +
-                "Apalancamiento: x{7} ({8}; por tu SL llegaría a x{9})`n" +
-                "{10}`n`n" +
-                "Entrada: {11}{12}`n`n" +
-                "TP:`n1) {13} (1:1)  +{14:N0}% s/margen`n2) {15} (1:2)  +{16:N0}% s/margen`n`nTP final: {17} (1:3)  +{18:N0}% s/margen (movimiento +{19:N1}%)`n`n" +
-                "🛑 SL: {20} (-{21:N1}%)  -{22:N0}% s/margen`n`n" +
-                "💰 Margen sugerido: {23:N0} USDT (máx. {24:N0}) -> posición {25:N0} USDT`n" +
-                "Si salta el SL: -{26:N0} USDT`n" +
-                "Si llega a TP1 / TP2 / TP3: +{27:N0} / +{28:N0} / +{29:N0} USDT`n" +
-                "Gestión: cierra {30:N0}% en TP1, {31:N0}% en TP2 y {32:N0}% en TP3, y mueve el SL a la entrada tras el TP1 (ganancia total ~+{33:N0} USDT).`n" +
-                "Comisiones estimadas: {34:N1} USDT ({35:N0}% de la ganancia en TP1)`n{41}`n`n" +
-                "Riesgo de la moneda: {36} (vol. 24h {37} USDT, rango diario medio {38:N1}%)`n" +
-                "Motivo: {39}`n{40}") -f
-                $icon, $name, $side, $arrow, $iv, $stratName, $poolTxt, $lev, $plan.Why, $plan.LSl,
-                $(if ($entryType -eq "limit") { "Operación con orden limit (válida unas $valid h; si no se ejecuta, se cancela)" } else { "Entrada a mercado" }),
-                (Fmt $entry), $(if ($entryType -eq "limit") { " (orden limit)" } else { "" }),
-                (Fmt $tp1), $roi1, (Fmt $tp2), $roi2, (Fmt $tp3), $roi3, $tpPct, (Fmt $sl), $slPct, $roiSl, $margin, $MaxMargin, $notional,
-                $lossUsd, $u1, $u2, $u3, ($W1 * 100), ($W2 * 100), ($W3 * 100), $planGain, $feeUsd, $feeShare, $plan.Risk, $volTxt, $dr, $why, ($ctx -join "`n"), $rbTxt
-
-            # --- Versión GENÉRICA para el grupo Alertas Mercados (solo cripto en 4h, el marco validado): sin margen, apalancamiento ni cifras privadas de Luis ---
+            # --- Señal COMPACTA (la misma para el chat privado de Bitunix y para Alertas Mercados): puntuación, entrada, apalancamiento, SL y TP. El detalle se pide con /informe o /momento. ---
+            $scSig = Get-SignalScore $name 'cripto' $sgn ([double]$entry)
+            $msg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto'
             $genMsg = $null
-            if ($iv -eq "4h" -and $strat -eq "ruptura" -and $script:MktChat) {
-                $posEx = 10000 * 0.01 / ($slPct / 100)
-                $genMsg = (@(
-                    ("{0} {1}/USDT {2} {3}  ({4} · {5}) · cripto (futuros)" -f $icon, $name, $side, $arrow, $iv, $stratName),
-                    "",
-                    $(if ($entryType -eq "limit") { "Entrada: orden limit en {0} (válida unas {1} h; si no se ejecuta, se cancela)" -f (Fmt $entry), $valid } else { "Entrada a mercado cerca de {0}" -f (Fmt $entry) }),
-                    ("🛑 SL: {0} (-{1:N1}%)" -f (Fmt $sl), $slPct),
-                    ("🎯 TP1 (1:1): {0} · TP2 (1:2): {1} · TP3 (1:3): {2} (hasta +{3:N1}% de movimiento)" -f (Fmt $tp1), (Fmt $tp2), (Fmt $tp3), $tpPct),
-                    "Gestión: cierra un tercio en cada objetivo y mueve el SL a la entrada tras el TP1.",
-                    "",
-                    ("💰 Tamaño: arriesga como máximo el 1% de tu capital. Posición = (capital × 1%) ÷ ({0:N1}% de distancia al SL). Con 10.000 USDT de capital: posición ≈ {1:N0} USDT. Usa el apalancamiento mínimo necesario; la liquidación debe quedar mucho más lejos que el SL." -f $slPct, $posEx),
-                    ("Motivo: {0}" -f $why),
-                    ($ctx -join "`n"),
-                    "",
-                    "📊 Backtest de esta táctica en cripto 4h (98 series, ~200 días): llega a TP1 en ≈ 7 de cada 10 operaciones y da ≈ +0,4R de media por operación, con rachas de hasta 3 pérdidas. Dato histórico, no una promesa.",
-                    "⚠️ Señal automática calculada con datos públicos; no es asesoramiento financiero. Pon siempre el stop loss y no arriesgues más de lo que puedas permitirte perder."
-                ) -join "`n")
-                if ($genMsg.Length -gt 3900) { $genMsg = $genMsg.Substring(0, 3890) + "…" }
-            }
-            # --- Gráfico estilo TradingView ---
+            if ($iv -eq "4h" -and $strat -eq "ruptura" -and $script:MktChat) { $genMsg = $msg }
             $photo = $null
-            if ($hasChart) {
-                $cs = @($closed | Select-Object -Last 70 | ForEach-Object { [pscustomobject]@{ o = [double]$_.open; h = [double]$_.high; l = [double]$_.low; c = [double]$_.close } })
-                $photo = New-SignalChart $cs $side $entry $sl $tp1 $tp2 $tp3 ("{0}/USDT {1} · {2} · {3}" -f $name, $iv, $side, $stratName) (Join-Path ([IO.Path]::GetTempPath()) ("senal-" + $t.symbol + ".png")) $level
-            }
             if (Send-Alert $key $msg $photo) {
                 if ($genMsg -and $TelegramToken) { try { Send-Tg $TelegramToken $script:MktChat $genMsg $null } catch {} }
                 Add-SignalRecord ([ordered]@{

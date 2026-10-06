@@ -92,41 +92,12 @@ function Get-MktSetup($b) {
 }
 
 function MktF($x, $cur) { if ($x -ge 100) { return ("{0:N2}" -f $x) } elseif ($x -ge 1) { return ("{0:N3}" -f $x) } else { return ("{0:G5}" -f $x) } }
-function Build-MktMessage($b, $s) {
-    $sg = $s.side; $dir = if ($sg -eq 1) { "LONG" } else { "SHORT" }; $icon = if ($sg -eq 1) { "🟢" } else { "🔴" }; $arrow = if ($sg -eq 1) { "📈" } else { "📉" }
-    $kind = if ($b.kind -eq "ETF") { "ETF" } elseif ($b.tkr -like '*.MC') { "acción española" } else { "acción" }; $cur = $b.cur
-    $pct = { param($x) ($x / $s.entry - 1) * 100 }
-    $slPct = [Math]::Abs($s.sl / $s.entry - 1) * 100
-    $cap = 10000.0; $risk1 = $cap * 0.01; $sh = [Math]::Floor($risk1 / $s.R); $posVal = $sh * $s.entry
-    $L = @()
-    $L += ("{0} {1} · {2} ({3} · {4}) {5} {6}  (1d · Ruptura con retesteo)" -f $icon, $b.tkr, $b.name, $kind, $b.exch, $dir, $arrow)
-    $L += ""
-    $L += ("Entrada: orden limit {0} {1}{2}" -f $(if ($sg -eq 1) { "de COMPRA a" } else { "de VENTA en corto a" }), (MktF $s.entry $cur), " $cur")
-    $L += ("   Válida 4 sesiones. Se cancela si no se ejecuta en ese plazo, si el precio pierde el SL antes de entrar o si se va al TP1 sin dar la entrada.")
-    $L += ""
-    $L += ("🛑 SL: {0} ({1:+0.0;-0.0}%)" -f (MktF $s.sl $cur), (& $pct $s.sl))
-    $L += ("🎯 TP1 (1:1): {0} ({1:+0.0;-0.0}%) · TP2 (1:2): {2} ({3:+0.0;-0.0}%) · TP3 (1:3): {4} ({5:+0.0;-0.0}%)" -f (MktF $s.tp1 $cur), (& $pct $s.tp1), (MktF $s.tp2 $cur), (& $pct $s.tp2), (MktF $s.tp3 $cur), (& $pct $s.tp3))
-    $L += "Gestión: cierra un tercio en cada objetivo y mueve el SL a la entrada tras el TP1."
-    $L += ""
-    $L += ("💰 Tamaño (sin apalancamiento): arriesga como máximo el 1% de tu capital. Nº de acciones/participaciones = (capital × 1%) ÷ {0:N2} (distancia entrada-SL). Con 10.000 {1}: ≈ {2:N0} unidades (≈ {3:N0} {1} de posición, pérdida máxima ≈ {4:N0} {1})." -f $s.R, $cur, $sh, $posVal, ($sh * $s.R))
-    if ($sg -eq -1) { $L += "   Los cortos requieren un bróker que permita vender en corto o CFD; si no, descártala." }
-    $L += ""
-    $L += ("Motivo: rompe el {0} de 20 sesiones ({1}) con volumen x{2:N1} y se entra en el retesteo del nivel roto." -f $(if ($sg -eq 1) { "máximo" } else { "mínimo" }), (MktF $s.level $cur), $s.ratio)
-    $L += "🧭 Contexto (zoom out semanal):"
-    $L += ("   ✅ Tendencia semanal {0} y estructura semanal {1}: sin contra" -f $(if ($s.wk.trend -eq "up") { "alcista" } elseif ($s.wk.trend -eq "down") { "bajista" } else { "lateral" }), $(if ($s.wk.struct -eq "up") { "de máximos y mínimos crecientes" } elseif ($s.wk.struct -eq "down") { "de máximos y mínimos decrecientes" } else { "mixta" }))
-    $L += ("   ✅ Espacio hasta el siguiente obstáculo semanal: {0}" -f $(if ($s.room -ge 99) { "sin obstáculos relevantes" } else { ("{0:N1}R" -f $s.room) }))
-    # sentimiento, análisis técnico y TradingView (informativos)
-    if (Get-Command Get-MarketSentiment -ErrorAction SilentlyContinue) { try { $sent = Get-MarketSentiment $false; if ($sent) { $L += "🌡️ $sent" } } catch {} }
-    if (Get-Command Analyze-TF -ErrorAction SilentlyContinue) {
-        try { $cd = New-Cd $b.o $b.h $b.l $b.c $b.v; $an = Analyze-TF $cd "1d" 90; if ($an) { $L += ""; $L += "🧮 Análisis técnico (velas diarias):"; $L += @($an.lines | Select-Object -First 3); $L += @($an.liq) } } catch {}
-        try { $tv = Resolve-TvTarget 'yahoo' $b.tkr $b.exch; $L += (Get-TvLines $tv -Short) } catch {}
-    }
-    $L += ""
-    $L += "📊 Backtest de esta táctica en velas diarias (348 acciones y ETFs, ~10 años, 373 operaciones): llega a TP1 en ≈ 6 de cada 10 operaciones y da ≈ +0,3R de media por operación (≈ +0,1R en el último 40% del periodo), con rachas de hasta 6 pérdidas seguidas. Es un dato histórico, no una promesa."
-    $L += "⚠️ Señal automática calculada con datos públicos; no es asesoramiento financiero. Comisiones y deslizamiento del bróker aparte. Pon siempre el stop loss y no arriesgues más de lo que puedas permitirte perder."
-    return ($L -join "`n")
+function Build-MktMessage($b, $s) {      # señal COMPACTA: puntuación, entrada, apalancamiento orientativo, SL y TP. El detalle se pide con /informe SIMBOLO.
+    $sg = $s.side; $slPct = [Math]::Abs($s.sl / $s.entry - 1) * 100
+    $kind = if ($b.kind -eq "ETF") { "ETF" } else { "accion" }
+    $score = Get-SignalScore $b.tkr $kind $sg ([double]$s.px) $b.exch
+    return (Format-CompactSignal $sg ("{0} · 1d" -f $b.tkr) $score $s.entry $true (Get-SuggestedLev $slPct $kind) $s.sl $s.tp1 $s.tp2 $s.tp3 $kind)
 }
-
 # ---------- barrido diario del universo ----------
 function Scan-Market([switch]$Dry) {
     $found = 0; $scanned = 0; $mkt = $null
