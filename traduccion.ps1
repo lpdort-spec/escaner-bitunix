@@ -22,7 +22,8 @@ function Invoke-GoogleTr([string]$t) {
         $u = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=es&dt=t&q=" + [uri]::EscapeDataString($t)
         $r = Invoke-WebRequest $u -UseBasicParsing -TimeoutSec 15; $raw = [Text.Encoding]::UTF8.GetString($r.RawContentStream.ToArray())
         $lang = [regex]::Match($raw, ',"([a-z\-]{2,7})",(?:null|\d)').Groups[1].Value; $out = ""
-        foreach ($m in [regex]::Matches($raw, '\["((?:[^"\\]|\\.)*)","((?:[^"\\]|\\.)*)"')) { $out += ("""" + $m.Groups[1].Value + """" | ConvertFrom-Json) }
+        $cut = $raw.IndexOf(']],null,'); $segs = if ($cut -gt 0) { $raw.Substring(0, $cut) } else { $raw }      # solo la lista de frases traducidas (lo que viene después son metadatos, p. ej. un código hash)
+        foreach ($m in [regex]::Matches($segs, '\["((?:[^"\\]|\\.)*)","((?:[^"\\]|\\.)*)",(?:null|\d)')) { $out += ("""" + $m.Groups[1].Value + """" | ConvertFrom-Json) }
         if (-not $out) { return $null }; return @{ text = $out; lang = $lang }
     } catch { return $null }
 }

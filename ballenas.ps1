@@ -15,10 +15,33 @@ function Get-BallPositions([double]$minUsd) {      # @{ clave = detalle } de las
         try { $b = @{ type = 'clearinghouseState'; user = $a } | ConvertTo-Json -Compress; $st = Invoke-RestMethod 'https://api.hyperliquid.xyz/info' -Method Post -Headers $h -Body $b -TimeoutSec 20
             foreach ($p in @($st.assetPositions)) { $pos = $p.position; $nv = [Math]::Abs([double]$pos.positionValue); if ($nv -ge $minUsd) {
                 $side = if ([double]$pos.szi -gt 0) { 'L' } else { 'S' }; $k = "{0}|{1}|{2}" -f $a.Substring(2, 8), $pos.coin, $side
-                $out[$k] = @{ addr = $a; coin = "$($pos.coin)"; side = $side; usd = $nv; lev = $pos.leverage.value; entry = [double]$pos.entryPx; liq = $(if ($pos.liquidationPx) { [double]$pos.liquidationPx } else { $null }); upl = [double]$pos.unrealizedPnl; acct = [double]$st.marginSummary.accountValue } } } } catch {}
+                $out[$k] = [pscustomobject]@{ addr = $a; coin = "$($pos.coin)"; side = $side; usd = $nv; lev = $pos.leverage.value; entry = [double]$pos.entryPx; liq = $(if ($pos.liquidationPx) { [double]$pos.liquidationPx } else { $null }); upl = [double]$pos.unrealizedPnl; acct = [double]$st.marginSummary.accountValue } } } } catch {}
         Start-Sleep -Milliseconds 100
     }
     return $out
+}
+function Handle-Ballenas($ra) {      # /ballenas [MONEDA]: foto de las posiciones >= 2 M USD de las mayores carteras de Hyperliquid
+    $coin = @($ra | ForEach-Object { "$_" } | Where-Object { $_ -match '^[A-Za-z0-9]{2,12}$' } | Select-Object -First 1)[0]
+    $pos = @((Get-BallPositions 2000000).Values); if (-not $pos.Count) { return "Hyperliquid no ha devuelto datos ahora. Prueba en unos minutos." }
+    $hora = (Get-Date).ToString('dd/MM HH:mm'); $L = @()
+    if ($coin) {
+        $c = ("$coin".ToUpper() -replace 'USDT$', ''); $hl = if ($c -like '1000*') { 'k' + $c.Substring(4) } else { $c }
+        $x = @($pos | Where-Object { $_.coin -ieq $hl -or $_.coin -ieq $c })
+        if (-not $x.Count) { return "Ninguna de las mayores carteras de Hyperliquid tiene ahora una posición de 2 M USD o más en $c (o la moneda no cotiza allí)." }
+        $lg = @($x | Where-Object { $_.side -eq 'L' }); $st = @($x | Where-Object { $_.side -eq 'S' }); $sl = ($lg | Measure-Object usd -Sum).Sum; $ss = ($st | Measure-Object usd -Sum).Sum; if (-not $sl) { $sl = 0 }; if (-not $ss) { $ss = 0 }
+        $L += ("🐋 BALLENAS en {0} · Hyperliquid · {1} (hora de España)" -f $c, $hora)
+        $L += ("Posiciones de 2 M USD o más en las mayores carteras: {0:N1} M USD en LARGO ({1} carteras) frente a {2:N1} M USD en CORTO ({3} carteras) → {4}" -f ($sl / 1e6), $lg.Count, ($ss / 1e6), $st.Count, $(if ($sl + $ss -le 0) { "sin datos" } elseif ($sl -ge 1.5 * $ss) { "sesgo LARGO ($([int](100 * $sl / ($sl + $ss)))%)" } elseif ($ss -ge 1.5 * $sl) { "sesgo CORTO ($([int](100 * $ss / ($sl + $ss)))%)" } else { "equilibrado" }))
+        foreach ($p in ($x | Sort-Object usd -Descending | Select-Object -First 8)) { $L += ("   {0} {1:N1} M · x{2} · entrada {3}{4} · PnL no real. {5:+0.0;-0.0} M" -f $(if ($p.side -eq 'L') { "🟢 LARGO" } else { "🔴 CORTO" }), ($p.usd / 1e6), $p.lev, (TaFp $p.entry), $(if ($p.liq) { " · liq. " + (TaFp $p.liq) } else { "" }), ($p.upl / 1e6)) }
+    } else {
+        $L += ("🐋 BALLENAS · mayores posiciones abiertas en Hyperliquid · {0} (hora de España)" -f $hora)
+        foreach ($g in ($pos | Group-Object coin | Sort-Object { ($_.Group | Measure-Object usd -Sum).Sum } -Descending | Select-Object -First 8)) { $sl = (@($g.Group | Where-Object { $_.side -eq 'L' }) | Measure-Object usd -Sum).Sum; $ss = (@($g.Group | Where-Object { $_.side -eq 'S' }) | Measure-Object usd -Sum).Sum; if (-not $sl) { $sl = 0 }; if (-not $ss) { $ss = 0 }
+            $L += ("   {0}: {1:N0} M largo · {2:N0} M corto → {3}" -f $g.Name, ($sl / 1e6), ($ss / 1e6), $(if ($sl -ge 1.5 * $ss) { "🟢 sesgo largo" } elseif ($ss -ge 1.5 * $sl) { "🔴 sesgo corto" } else { "⚪ equilibrado" })) }
+        $L += ""; $L += "Mayores posiciones individuales:"
+        foreach ($p in ($pos | Sort-Object usd -Descending | Select-Object -First 6)) { $L += ("   {0} {1} {2:N0} M · x{3} · PnL no real. {4:+0;-0} M" -f $(if ($p.side -eq 'L') { "🟢" } else { "🔴" }), $p.coin, ($p.usd / 1e6), $p.lev, ($p.upl / 1e6)) }
+        $L += "Para una moneda concreta: /ballenas BTC"
+    }
+    $L += ""; $L += "ℹ️ Solo se ven las mayores carteras de Hyperliquid (exchange descentralizado, posiciones públicas on-chain). En Binance, Bybit, OKX o Bitunix no hay posiciones individuales públicas. Dato informativo, no una señal."
+    return ($L -join "`n")
 }
 function Format-BallAlert($p, $inBitunix) {
     $dir = if ($p.side -eq 'L') { "LARGO" } else { "CORTO" }; $em = if ($p.side -eq 'L') { "🟢" } else { "🔴" }
@@ -30,7 +53,7 @@ function Format-BallAlert($p, $inBitunix) {
 }
 function Send-BallenasIfDue {
     if (-not $TelegramToken) { return }
-    if (((Get-Date) - $script:BallAt).TotalMinutes -lt 10) { return }; $script:BallAt = Get-Date
+    if (((Get-Date) - $script:BallAt).TotalMinutes -lt 4) { return }; $script:BallAt = Get-Date      # cada ~4 min (cada pasada tarda ~20 s)
     $min = Get-BallMinUsd; $cur = Get-BallPositions ($min * 0.7); if (-not $cur.Count -and -not (Get-BallWallets).Count) { return }      # se recuerdan las posiciones desde el 70% del umbral: una que oscile junto a 10 M no avisa dos veces
     $prevRaw = Get-ReportState "ball"; $first = ($null -eq $prevRaw -or "$prevRaw" -eq ''); $prev = @("$prevRaw" -split ',' | Where-Object { $_ })
     $new = @($cur.Keys | Where-Object { $_ -notin $prev -and $cur[$_].usd -ge $min } | Sort-Object { $cur[$_].usd } -Descending)

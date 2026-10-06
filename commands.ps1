@@ -169,6 +169,9 @@ $script:HelpText = @"
    Ejemplo: /riesgo ETH LARGO 2664.24 2638 2723 135 20
 /momento SIMBOLO [largo|corto] · ¿es buen momento para abrir una operación en ese activo (acción, ETF, cripto...)? Puntúa largo y corto con reglas fijas y propone un plan orientativo
    Ejemplos: /momento AAPL · /momento BTC · /momento SAN.MC corto
+/opinion LARGO|CORTO SIMBOLO [PRECIO] · te doy mi opinión sobre una idea (sin SL, TP ni apalancamiento; no es una alerta). Ej.: /opinion largo BTC 85500 · /opinion corto TSLA 250
+/traders [SIMBOLO] · posicionamiento de los mejores traders: BTC y ETH sin argumentos; también cripto o acciones de EE. UU. (ej.: /traders TSLA)
+/ballenas [MONEDA] · posiciones de las mayores carteras de Hyperliquid (únicas públicas): cuánto hay en largo y en corto y las mayores posiciones. Ej.: /ballenas BTC
 /ayuda · esta ayuda
 /id · muestra el identificador del chat
 
@@ -379,6 +382,21 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
                 Send-Tg $token $chat (Resolve-Report $qw.text $mode) $null
             }
             "/riesgo" { Send-Tg $token $chat (Build-RiskReport $args1) $m.message_id }
+            "/opinion" {
+                if (-not (Get-Command Handle-Opinion -ErrorAction SilentlyContinue)) { Send-Tg $token $chat "El módulo de opinión no está disponible en este entorno." $m.message_id; break }
+                Send-Tg $token $chat "⏳ Valorando la idea (≈30 s)..." $m.message_id
+                $rep = try { Handle-Opinion $args1 } catch { "No he podido completar la opinión ahora: $($_.Exception.Message)" }; Send-Tg $token $chat $rep $null
+            }
+            "/traders" {
+                if (-not (Get-Command Handle-Traders -ErrorAction SilentlyContinue)) { Send-Tg $token $chat "El módulo de mejores traders no está disponible en este entorno." $m.message_id; break }
+                Send-Tg $token $chat "⏳ Reuniendo el posicionamiento de los mejores traders (≈30 s)..." $m.message_id
+                $rep = try { Handle-Traders $args1 } catch { "No he podido completar la consulta ahora: $($_.Exception.Message)" }; Send-Tg $token $chat $rep $null
+            }
+            "/ballenas" {
+                if (-not (Get-Command Handle-Ballenas -ErrorAction SilentlyContinue)) { Send-Tg $token $chat "El módulo de ballenas no está disponible en este entorno." $m.message_id; break }
+                Send-Tg $token $chat "⏳ Leyendo las posiciones de las mayores carteras de Hyperliquid (≈20 s)..." $m.message_id
+                $rep = try { Handle-Ballenas $args1 } catch { "No he podido leer las posiciones ahora: $($_.Exception.Message)" }; Send-Tg $token $chat $rep $null
+            }
             default { }
         }
     }
@@ -393,6 +411,9 @@ if (Test-Path (Join-Path $PSScriptRoot "ampliar.ps1")) { . (Join-Path $PSScriptR
 if (Test-Path (Join-Path $PSScriptRoot "traduccion.ps1")) { . (Join-Path $PSScriptRoot "traduccion.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "sl-estructura.ps1")) { . (Join-Path $PSScriptRoot "sl-estructura.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "dinero-inteligente.ps1")) { . (Join-Path $PSScriptRoot "dinero-inteligente.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "ballenas.ps1")) { . (Join-Path $PSScriptRoot "ballenas.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "traders.ps1")) { . (Join-Path $PSScriptRoot "traders.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "opinion.ps1")) { . (Join-Path $PSScriptRoot "opinion.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-compacta.ps1")) { . (Join-Path $PSScriptRoot "senal-compacta.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "control-riesgo.ps1")) { . (Join-Path $PSScriptRoot "control-riesgo.ps1") }

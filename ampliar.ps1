@@ -67,6 +67,10 @@ function Handle-FreeText($text) {
     $sym = $null; foreach ($w in ($t -split '[\s,;:¿?¡!]+')) { $u = $w.ToUpper(); if ($w -match '^[A-Za-z0-9]{2,12}$' -and $w.ToLower() -notin $stop -and $tick -and $u -in $tick) { $sym = $u; break } }
     $nums = @([regex]::Matches($t, '\d+(?:[.,]\d+)?') | ForEach-Object { $_.Value })
     $side = if ($lt -match '\b(corto|short)\b') { 'corto' } elseif ($lt -match '\b(largo|long)\b') { 'largo' } else { '' }
+    # opinión sobre una idea («operación largo BTC 85.500», «corto TSLA 250», «qué te parece un largo en ETH»): sin SL/TP/apalancamiento, no es una alerta
+    $opKw = ($lt -match 'opini|qu[eé] te parece|c[oó]mo ves|como ves|qu[eé] opinas|lo ves')
+    if (-not $sym -and ($side -or $opKw)) { foreach ($w in ($t -split '[\s,;:¿?¡!]+')) { if ($w -cmatch '^[A-Z]{1,5}$' -and $w.ToLower() -notin $stop) { $sym = $w; break } } }
+    if ($sym -and ($side -or $opKw) -and $lt -notmatch 'ampli|aument|añad|anad|promedi' -and ($nums.Count -or $opKw) -and (Get-Command Handle-Opinion -ErrorAction SilentlyContinue)) { return (Handle-Opinion @($t -split '\s+')) }
     if ($sym -and $lt -match 'ampli|aument|añad|anad|promedi|bajar.*(precio|entrada)|subir.*(posici|margen)|hasta.*\d+') { return (Handle-Ampliar (@($sym) + $nums)) }
     if ($sym -and $lt -match 'c[oó]mo (la )?ves|consult|abrir|abro|entrar|entro|momento|qu[eé] opinas|merece|compro|vendo|largo|corto|long|short') { return (Get-ConsultaReport $sym $side) }
     if ($sym) { return (Get-ConsultaReport $sym $side) }
