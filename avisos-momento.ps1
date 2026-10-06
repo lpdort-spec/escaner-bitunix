@@ -73,7 +73,7 @@ function Register-MomSignal($kind, $sym, $lv, $plan) {      # cada aviso emitido
 }
 # Procesa una lista de elementos; devuelve nº de avisos enviados. -Dry: solo muestra puntuaciones, no envía ni guarda estado.
 function Invoke-MomItems($kind, $items, [switch]$Dry) {
-    $thr = [int](Get-MomCfg 'umbralMomento' 7); $act = @(Get-MomAct); $sent = 0; $cap = 8
+    $thr = [int](Get-MomCfg 'umbralMomento' 7); $act = @(Get-MomAct); $sent = 0; $cap = 8; $sigAll = @(); try { $sigAll = @(Read-Signals | Where-Object { $_.strat -eq 'aviso-momento' }) } catch {}
     foreach ($it in $items) {
         if (($script:cmdTick++ % 10) -eq 0) { try { Poll-Commands } catch {} }
         try {
@@ -88,12 +88,18 @@ function Invoke-MomItems($kind, $items, [switch]$Dry) {
                 if ($score -ge $thr -and $key -notin $act) {
                     if ($script:MomSent -ge $cap) { continue }
                     $plan = if ($side -eq 'L') { $sc.lg.plan } else { $sc.st.plan }
+                    # entrada limit en un retroceso lejos del precio actual: no se emite (no es operable ahora); se reevalua en el siguiente cierre
+                    if ($plan.pullback -and $s.price -and [Math]::Abs([double]$plan.entry - [double]$s.price) / [double]$s.price * 100 -gt 1.5) { continue }
                     $msg = Build-MomAlert $kind $sym $side $score $plan; if (-not $msg) { continue }
                     if ($kind -eq 'cripto') { Send-ToSignalChats $msg }
                     if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $msg $null }
                     try { Register-MomSignal $kind $sym (Get-OrderLevels $side $plan $kind) $plan } catch {}
                     $act += $key; $sent++; $script:MomSent++
                 } elseif ($score -lt ($thr - 3) -and $key -in $act) {
+                    # un aviso recien emitido no se invalida con el ruido del precio en vivo: hace falta que haya cerrado al menos una vela nueva (4h cripto, 1d acciones)
+                    $sgn = if ($side -eq 'L') { 1 } else { -1 }; $minAge = if ($kind -eq 'cripto') { 14400 } else { 86400 }
+                    $emit = @($sigAll | Where-Object { $_.id -like "mom-$sym-$sgn-*" } | Sort-Object { [long]$_.time } -Descending | Select-Object -First 1)
+                    if ($emit.Count -and ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [long]$emit[0].time) -lt $minAge) { continue }
                     $act = @($act | Where-Object { $_ -ne $key })
                     # el aviso de buen momento ya no se cumple: se avisa de que, si se abrió, conviene valorar cerrarla o protegerla (mismos destinos que el aviso original)
                     $me = if ($side -eq 'L') { $sc.lg } else { $sc.st }; $neg = @($me.fx | Where-Object { $_ -like '⚠️*' } | Select-Object -First 4)
