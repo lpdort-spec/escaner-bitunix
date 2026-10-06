@@ -34,12 +34,25 @@ function Get-SideByColor([string]$path, [int]$y0, [int]$y1) {
         $img.Dispose(); if ($g -gt 80 -and $g -gt 2 * $r) { return 1 }; if ($r -gt 80 -and $r -gt 2 * $g) { return -1 }; return 0
     } catch { return 0 }
 }
-function Read-PositionScreenshot([string]$path, [string]$captionSym) {
-    $rows = Get-ImageOcrRows $path; if ($null -eq $rows) { return @{ error = "El OCR no está disponible en este entorno." } }
+function Read-PositionScreenshot([string]$path, [string]$captionSym) {      # varias pasadas (distinta ampliación/inversión); cada una rellena lo que falta
+    $merged = $null
+    foreach ($cfg in @(@(3, $true), @(4, $true), @(6, $true), @(2, $true), @(4, $false))) {
+        $q = Read-PositionOnce $path $captionSym $cfg[0] $cfg[1]
+        if ($q.error) { if (-not $merged) { $merged = $q }; if ($q.error -like '*no está disponible*') { return $q }; continue }
+        if (-not $merged -or $merged.error) { $merged = $q } else { foreach ($k in @($q.Keys)) { if ($k -eq 'notes') { $merged.notes = @($merged.notes) + @($q.notes) | Select-Object -Unique } elseif (-not $merged.ContainsKey($k) -or $null -eq $merged[$k]) { $merged[$k] = $q[$k] } } }
+        if ($merged.sym -and $merged.entry -and $merged.side -and $merged.margin -and ($merged.levels -or $merged.sl)) { break }
+    }
+    if ($merged -and -not $merged.error -and $merged.entry -and $merged.side -and $merged.levels -and -not ($merged.sl -or $merged.tp)) { foreach ($n in $merged.levels) { if ($merged.side * ($n - $merged.entry) -gt 0) { $merged.tp = $n } else { $merged.sl = $n } } }
+    return $merged
+}
+function Read-PositionOnce([string]$path, [string]$captionSym, [double]$sc0, [bool]$inv) {
+    $rows = Get-ImageOcrRows $path $sc0 $inv; if ($null -eq $rows) { return @{ error = "El OCR no está disponible en este entorno." } }
     if (-not @($rows).Count) { return @{ error = "No he conseguido leer texto en la imagen." } }
+    $fw = 1580.0; try { Add-Type -AssemblyName System.Drawing; $im = [System.Drawing.Image]::FromFile((Resolve-Path $path).Path); $fw = [double]$im.Width; $im.Dispose() } catch {}
+    $f = [Math]::Max(0.5, [Math]::Min(1.8, $fw / 1580.0))
     $p = @{ notes = @() }
     $find = { param($rx) @($rows | Where-Object { $_.t -match $rx } | Select-Object -First 1)[0] }
-    $below = { param($h, $dx = 70) if (-not $h) { return $null }; @($rows | Where-Object { $_.y -gt $h.y + 10 -and $_.y -lt $h.y + 75 -and [Math]::Abs($_.x - $h.x) -le $dx } | Sort-Object y, x | Select-Object -First 1)[0] }
+    $below = { param($h, $dx = 70) if (-not $h) { return $null }; @($rows | Where-Object { $_.y -gt $h.y + 8 * $f -and $_.y -lt $h.y + 80 * $f -and [Math]::Abs($_.x - $h.x) -le ($dx * $f + 25) } | Sort-Object y, x | Select-Object -First 1)[0] }
     # símbolo
     $symRow = @($rows | Where-Object { $_.y -lt 110 -and $_.t -match '(?i)[A-Z0-9]{2,12}\s*USDT' } | Select-Object -First 1)[0]
     $tick = @((Invoke-RestMethod "$($script:CmdBase)/tickers" -TimeoutSec 20).data)
@@ -154,7 +167,7 @@ function Handle-Screenshot($token, $m, $chat) {
         $miss = @(); foreach ($k in 'sym', 'entry', 'side') { if (-not $p.$k) { $miss += $k } }
         if ($miss.Count) {
             $got = @(); foreach ($k in 'sym', 'entry', 'mark', 'margin', 'liq', 'sl', 'tp', 'lev') { if ($p.$k) { $got += "$k=$($p.$k)" } }
-            return ("⚠️ No he podido leer con seguridad: {0}.`nHe leído: {1}.`n{2}`nSi quieres, reenvíala como ARCHIVO (sin comprimir) o con el símbolo en el pie (ej. API3), o regístrala con /operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO." -f ($miss -join ', '), $(if ($got.Count) { $got -join ' · ' } else { "nada fiable" }), (($p.notes | ForEach-Object { "· $_" }) -join "`n"))
+            return ("⚠️ No he podido leer con seguridad: {0}.`nHe leído: {1}.`n{2}`nPara que la lea bien: recorta SOLO la tabla de 'Posiciones' (que ocupe toda la imagen) y envíala como ARCHIVO (clip → Archivo, sin comprimir); las fotos normales pierden calidad en Telegram. También puedes añadir el símbolo en el pie (ej. API3) o registrarla con /operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO." -f ($miss -join ', '), $(if ($got.Count) { $got -join ' · ' } else { "nada fiable" }), (($p.notes | ForEach-Object { "· $_" }) -join "`n"))
         }
         $txt = Format-CapturaAnalysis $p $true "$($m.from.first_name)"
         $warn = @($p.notes | Where-Object { $_ }); if ($warn.Count) { $txt += "`n`nℹ️ Notas de lectura: " + ($warn -join "; ") + ". Si algún dato no coincide con tu pantalla, dímelo." }
