@@ -297,7 +297,7 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
         $script:LastCmd[$key] = Get-Date
         switch ($cmd) {
             { $_ -in "/ayuda", "/start", "/help" } {
-                $h = $script:HelpText; if (-not $script:PrivateChats -or $chat -in $script:PrivateChats) { $h = $h.Replace("/ayuda · esta ayuda", "/resultados · informe diario sencillo (señales + tus operaciones manuales); también llega solo cada día a las 22:00 (hora de España)`n/semanal · informe semanal profundo con análisis de los fallos; también llega solo los domingos a las 22:00`n/operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · registra una operación tuya en el seguimiento y la pasa por tu control de riesgo (margen, coste del SL, lectura del mercado, reentradas)`n/mercado · prueba en seco del escáner de acciones/ETFs (no envía nada al grupo)`n/cerrar PAR PRECIO · registra el cierre manual de una operación tuya`n/señal tomada [PAR] PRECIO [xAPAL] · me dices que tomaste una señal mía a ese precio: la valoro y la vigilo (cerrar, subir SL/TP, cierre parcial)`n/señal cerrada PAR [PRECIO] · dejo de vigilar esa operación`n(estos 6 comandos solo funcionan en este chat privado)`n/ayuda · esta ayuda") }
+                $h = $script:HelpText; if (-not $script:PrivateChats -or $chat -in $script:PrivateChats) { $h = $h.Replace("/ayuda · esta ayuda", "/resultados · informe diario sencillo (señales + tus operaciones manuales); también llega solo cada día a las 22:00 (hora de España)`n/semanal · informe semanal profundo con análisis de los fallos; también llega solo los domingos a las 22:00`n/operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · registra una operación tuya en el seguimiento y la pasa por tu control de riesgo (margen, coste del SL, lectura del mercado, reentradas)`n/mercado · prueba en seco del escáner de acciones/ETFs (no envía nada al grupo)`n/cerrar PAR PRECIO · registra el cierre manual de una operación tuya`n/señal tomada [PAR] PRECIO [xAPAL] · me dices que tomaste una señal mía a ese precio: la valoro y la vigilo (cerrar, subir SL/TP, cierre parcial)`n/señal cerrada PAR [PRECIO] · dejo de vigilar esa operación`n/consulta SIMBOLO [largo|corto] · te digo si abrir ahora, esperar o no abrir una cripto de Bitunix, con plan de SL, parciales y apalancamiento (aislado)`n(estos 7 comandos solo funcionan en este chat privado)`n/ayuda · esta ayuda") }
                 Send-Tg $token $chat $h $m.message_id
             }
             { $_ -in "/señal", "/senal" } {
@@ -305,7 +305,7 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
                 $who = ""; try { $who = "$($m.from.first_name)" } catch {}
                 Send-Tg $token $chat (Handle-SenalTomada $args1 $chat $who) $m.message_id
             }
-            { $_ -in "/resultados", "/semanal", "/operacion", "/cerrar", "/mercado" } {
+            { $_ -in "/resultados", "/semanal", "/operacion", "/cerrar", "/mercado", "/consulta" } {
                 if ($script:PrivateChats -and $chat -notin $script:PrivateChats) { Send-Tg $token $chat "Este comando solo está disponible en el chat privado de Luis. Aquí puedes usar /informe, /precio y /riesgo." $m.message_id; break }
                 switch ($cmd) {
                     "/resultados" { $rep = try { if (Get-Command Get-DailyReport -ErrorAction SilentlyContinue) { Get-DailyReport } else { Get-Report } } catch { "Aún no hay resultados registrados." }; Send-Tg $token $chat $rep $m.message_id }
@@ -321,7 +321,11 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
                         foreach ($d in $script:MktDryOut) { Send-Tg $token $chat ("🧪 PRUEBA (no enviada al grupo)`n`n" + $d[1]) $null }
                     }
                     "/operacion" { Send-Tg $token $chat (Register-ManualFromArgs $args1) $m.message_id }
-                    "/cerrar" { Send-Tg $token $chat (Close-ManualFromArgs $args1) $m.message_id }                }
+                    "/cerrar" { Send-Tg $token $chat (Close-ManualFromArgs $args1) $m.message_id }
+                    "/consulta" {
+                        Send-Tg $token $chat "⏳ Analizando la cripto (1d, 4h y 1h)..." $m.message_id
+                        $rep = try { Handle-Consulta $args1 } catch { "No he podido completar la consulta ahora: $($_.Exception.Message)" }; Send-Tg $token $chat $rep $null
+                    }                }
             }
             "/precio" {
                 if (-not $args1) { Send-Tg $token $chat "Uso: /precio SIMBOLO (ej. /precio BTC o /precio AAPL)" $m.message_id; break }
@@ -358,6 +362,8 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
 if (Test-Path (Join-Path $PSScriptRoot "analisis-tecnico.ps1")) { . (Join-Path $PSScriptRoot "analisis-tecnico.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "momento.ps1")) { . (Join-Path $PSScriptRoot "momento.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "timing-1h.ps1")) { . (Join-Path $PSScriptRoot "timing-1h.ps1") }
+if ((Test-Path (Join-Path $PSScriptRoot "avisos-momento.ps1")) -and -not (Get-Command Get-OrderLevels -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "avisos-momento.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "consulta.ps1")) { . (Join-Path $PSScriptRoot "consulta.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-compacta.ps1")) { . (Join-Path $PSScriptRoot "senal-compacta.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "control-riesgo.ps1")) { . (Join-Path $PSScriptRoot "control-riesgo.ps1") }
