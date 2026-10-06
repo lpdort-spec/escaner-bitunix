@@ -17,7 +17,14 @@ function Get-MomScores($s) {
     $sentVal = $null; try { $t = Get-MarketSentiment ($s.src -ne 'yahoo'); if ($t -match '(\d+)/100') { $sentVal = [double]$Matches[1] } } catch {}
     $fund = if ($s.extra -and $null -ne $s.extra.funding) { [double]$s.extra.funding } else { $null }
     $tvr = if ($tv) { $tv.rating } else { $null }; $px = [double]$s.price
-    return @{ lg = (Score-Momento 1 $a4 $a1 $tvr $px $sentVal $fund); st = (Score-Momento -1 $a4 $a1 $tvr $px $sentVal $fund) }
+    $lg = Score-Momento 1 $a4 $a1 $tvr $px $sentVal $fund; $st = Score-Momento -1 $a4 $a1 $tvr $px $sentVal $fund
+    # capa de timing en 1h (cripto): Bollinger, RSI, volumen, velas y Fibonacci; penaliza entrar tarde/estirado
+    if (Get-Command Get-Timing1hBoth -ErrorAction SilentlyContinue) {
+        try { $tm = Get-Timing1hBoth $s $px
+            if ($tm) { foreach ($pair in @(@($lg, $tm.lg), @($st, $tm.st))) { $sc = $pair[0]; $t = $pair[1]; if ($sc -and $t) { $sc.score = [int]$sc.score + [int]$t.adj; $sc.fx = @($sc.fx) + @($t.fx); $sc.timing = [int]$t.adj } } }
+        } catch {}
+    }
+    return @{ lg = $lg; st = $st }
 }
 
 # Ficha de orden para copiar en Bitunix (SOLO chat privado): posición de 200 USDT de margen, apalancamiento orientativo para que el SL cueste como máximo el 35% del margen.

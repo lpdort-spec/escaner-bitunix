@@ -357,6 +357,7 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
 
 if (Test-Path (Join-Path $PSScriptRoot "analisis-tecnico.ps1")) { . (Join-Path $PSScriptRoot "analisis-tecnico.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "momento.ps1")) { . (Join-Path $PSScriptRoot "momento.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "timing-1h.ps1")) { . (Join-Path $PSScriptRoot "timing-1h.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-compacta.ps1")) { . (Join-Path $PSScriptRoot "senal-compacta.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "control-riesgo.ps1")) { . (Join-Path $PSScriptRoot "control-riesgo.ps1") }

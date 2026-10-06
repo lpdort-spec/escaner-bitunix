@@ -89,6 +89,11 @@ function Get-MomentoReport($raw, $mode, $wantSide) {
     $fund = if ($s.extra -and $null -ne $s.extra.funding) { [double]$s.extra.funding } else { $null }
     $lg = Score-Momento 1 $a4 $a1 $(if ($tv) { $tv.rating } else { $null }) $px $sentVal $fund
     $st = Score-Momento -1 $a4 $a1 $(if ($tv) { $tv.rating } else { $null }) $px $sentVal $fund
+    if (Get-Command Get-Timing1hBoth -ErrorAction SilentlyContinue) {      # capa de timing 1h (cripto de Bitunix)
+        try { $tm = Get-Timing1hBoth $s $px
+            if ($tm) { foreach ($pair in @(@($lg, $tm.lg), @($st, $tm.st))) { $sc = $pair[0]; $t = $pair[1]; if ($sc -and $t) { $sc.score = [int]$sc.score + [int]$t.adj; $sc.fx = @($sc.fx) + @($t.fx) } } }
+        } catch {}
+    }
     $verd = { param($p) if ($p -ge 7) { "🟢 BUEN MOMENTO RELATIVO" } elseif ($p -ge 4) { "🟡 ACEPTABLE CON CAUTELA (mejor entrando en un retroceso)" } elseif ($p -ge 1) { "🟠 POCO FAVORABLE: mejor esperar" } else { "🔴 NO ES BUEN MOMENTO" } }
     $L = @()
     if ($rsM.note) { $L += $rsM.note; $L += "" }
