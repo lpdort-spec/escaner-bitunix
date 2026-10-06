@@ -392,6 +392,7 @@ if (Test-Path (Join-Path $PSScriptRoot "consulta.ps1")) { . (Join-Path $PSScript
 if (Test-Path (Join-Path $PSScriptRoot "ampliar.ps1")) { . (Join-Path $PSScriptRoot "ampliar.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "traduccion.ps1")) { . (Join-Path $PSScriptRoot "traduccion.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "sl-estructura.ps1")) { . (Join-Path $PSScriptRoot "sl-estructura.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "dinero-inteligente.ps1")) { . (Join-Path $PSScriptRoot "dinero-inteligente.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-compacta.ps1")) { . (Join-Path $PSScriptRoot "senal-compacta.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "control-riesgo.ps1")) { . (Join-Path $PSScriptRoot "control-riesgo.ps1") }
