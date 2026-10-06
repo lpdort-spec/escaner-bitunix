@@ -245,22 +245,35 @@ function Build-RiskReport($ra) {
 
 # ---------- /operacion y /cerrar: registrar o cerrar una operación manual en el seguimiento (solo chat privado) ----------
 function Register-ManualFromArgs($ra) {
-    $uso = "Uso: /operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO`nEjemplo: /operacion ETH LARGO 2664.24 2638 2723 135 20`nSi ya hay una operación abierta de ese par, solo se actualizan SL y TP."
+    $uso = "Uso: /operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO`nEjemplo: /operacion ETH LARGO 2664.24 2638 2723 135 20`nTambién vale con etiquetas y en cualquier orden: /operacion FET largo entrada 0,2449 sl 0,2379 tp 0,2534 margen 148,47 x11`nSi ya hay una operación abierta de ese par, solo se actualizan SL y TP."
     if (-not (Get-Command Register-ManualTrade -ErrorAction SilentlyContinue)) { return "El seguimiento de operaciones manuales no está disponible en este entorno." }
-    if ($ra.Count -lt 7) { return $uso }
-    $symR = (($ra[0] -replace '[^A-Za-z0-9]', '').ToUpper()) -replace 'USDT$', ''
-    $w = $ra[1].ToLower(); $sg = 0; if ($w -in 'largo', 'long') { $sg = 1 } elseif ($w -in 'corto', 'short') { $sg = -1 }
-    if ($sg -eq 0) { return "Indica LARGO o CORTO.`n$uso" }
-    $nums = @()
-    foreach ($i in 2..6) { $s1 = (($ra[$i] -replace ',', '.') -replace '[^0-9.]', ''); $dv = 0.0; if (-not [double]::TryParse($s1, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$dv) -or $dv -le 0) { return "No entiendo el valor '$($ra[$i])'.`n$uso" }; $nums += $dv }
-    $en = $nums[0]; $sl = $nums[1]; $tp = $nums[2]; $mg = $nums[3]; $lv = $nums[4]
+    # lectura tolerante: acepta etiquetas (entrada, SL, TP, margen, xN) en cualquier orden y números con coma o punto; sin etiquetas, el orden es ENTRADA SL TP MARGEN APALANCAMIENTO
+    $symR = $null; $sg = 0; $slots = @{}; $order = @('en', 'sl', 'tp', 'mg', 'lv'); $pend = $null; $unl = @()
+    foreach ($tok in @($ra | ForEach-Object { "$_" })) {
+        $t0 = $tok.Trim().ToLower(); if (-not $t0) { continue }
+        if ($t0 -in 'largo', 'long', 'compra') { $sg = 1; continue }; if ($t0 -in 'corto', 'short', 'venta') { $sg = -1; continue }
+        if ($symR -and $t0 -match '^(sl|stop|stoploss)[:=]?([0-9][0-9.,]*)?$') { if ($Matches[2]) { $t0 = $Matches[2]; $pend = 'sl' } else { $pend = 'sl'; continue } }
+        elseif ($symR -and $t0 -match '^(tp|takeprofit|objetivo)[:=]?([0-9][0-9.,]*)?$') { if ($Matches[2]) { $t0 = $Matches[2]; $pend = 'tp' } else { $pend = 'tp'; continue } }
+        elseif ($symR -and $t0 -match '^(entrada|entry|precio|en)[:=]?([0-9][0-9.,]*)?$') { if ($Matches[2]) { $t0 = $Matches[2]; $pend = 'en' } else { $pend = 'en'; continue } }
+        elseif ($symR -and $t0 -match '^(margen|margin)[:=]?([0-9][0-9.,]*)?$') { if ($Matches[2]) { $t0 = $Matches[2]; $pend = 'mg' } else { $pend = 'mg'; continue } }
+        elseif ($symR -and $t0 -match '^(apalancamiento|lev|leverage)[:=]?([0-9][0-9.,]*)?$') { if ($Matches[2]) { $t0 = $Matches[2]; $pend = 'lv' } else { $pend = 'lv'; continue } }
+        if ($t0 -in 'usdt', 'aislado', 'isolated', 'cruzado', 'con', 'a', 'de', 'y', 'x') { continue }
+        if ($t0 -match '^x(\d+)$' -or $t0 -match '^(\d+)x$') { $slots['lv'] = [double]$Matches[1]; $pend = $null; continue }
+        if ($t0 -match '^[0-9][0-9.,]*$') { $s1 = ($t0 -replace ',', '.'); $dv = 0.0; if ([double]::TryParse($s1, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$dv) -and $dv -gt 0) { if ($pend) { $slots[$pend] = $dv; $pend = $null } else { $unl += $dv } }; continue }
+        if (-not $symR -and $t0 -match '^[a-z0-9]{2,15}$') { $symR = ($t0.ToUpper() -replace 'USDT$', ''); continue }
+    }
+    foreach ($v in $unl) { foreach ($k in $order) { if (-not $slots.ContainsKey($k)) { $slots[$k] = $v; break } } }
+    if (-not $symR) { return $uso }; if ($sg -eq 0) { return "Indica LARGO o CORTO.`n$uso" }
+    $faltan = @($order | Where-Object { -not $slots.ContainsKey($_) }); if ($faltan.Count) { $nombres = @{ en = 'ENTRADA'; sl = 'SL'; tp = 'TP'; mg = 'MARGEN'; lv = 'APALANCAMIENTO' }; return ("Me falta: {0}.`n{1}" -f (($faltan | ForEach-Object { $nombres[$_] }) -join ', '), $uso) }
+    $en = $slots['en']; $sl = $slots['sl']; $tp = $slots['tp']; $mg = $slots['mg']; $lv = $slots['lv']
     if ($sg * ($tp - $en) -le 0) { return "El TP debe estar " + $(if ($sg -eq 1) { "por encima" } else { "por debajo" }) + " de la entrada." }
     if ($sg * ($sl - $en) -ge $sg * ($tp - $en)) { return "El SL queda más allá del TP; revisa los datos." }
     $ok = $false; try { $ok = [bool](Invoke-RestMethod "$($script:CmdBase)/tickers?symbols=${symR}USDT" -TimeoutSec 15).data } catch {}
     if (-not $ok) { return "No encuentro ${symR}USDT en Bitunix, y el seguimiento usa sus velas. No registro la operación." }
     $chk = ""; try { if (Get-Command Get-RiskCheck -ErrorAction SilentlyContinue) { $chk = "`n`n" + (Get-RiskCheck $symR $sg $en $sl $tp $mg $lv) } } catch {}
     $r = Register-ManualTrade $symR $sg $en $sl $tp $mg $lv
-    return ("✅ Operación {0}: {1} {2} x{3:N0} · entrada {4} · SL {5} · TP {6} · margen {7:N2} USDT.`nQueda en el seguimiento: se resolverá sola con las velas de 1h (SL o TP) y saldrá en el informe diario y semanal. Si la cierras a mano, avísame con /cerrar {1} PRECIO." -f $r.action, $symR, $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), $lv, (Fpx $en), (Fpx $sl), (Fpx $tp), $mg) + $chk
+    $live = ""; try { if (Get-Command Add-LiveOrder -ErrorAction SilentlyContinue) { Add-LiveOrder $symR $sg $en $sl $tp $mg $lv "operacion" "Luis"; $live = "`n👁️ La vigilo además EN VIVO (cada ~40 s): te aviso de TP1/TP2/TP final, cercanía al SL y cambios de lectura." } } catch {}
+    return ("✅ Operación {0}: {1} {2} x{3:N0} · entrada {4} · SL {5} · TP {6} · margen {7:N2} USDT.`nQueda en el seguimiento: se resolverá sola con las velas de 1h (SL o TP) y saldrá en el informe diario y semanal. Si la cierras a mano, avísame con /cerrar {1} PRECIO." -f $r.action, $symR, $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), $lv, (Fpx $en), (Fpx $sl), (Fpx $tp), $mg) + $live + $chk
 }
 function Close-ManualFromArgs($ra) {
     $uso = "Uso: /cerrar PAR PRECIO_DE_SALIDA`nEjemplo: /cerrar ETH 2690.5"

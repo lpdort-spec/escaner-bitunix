@@ -30,7 +30,7 @@ function Get-ImageOcrRows([string]$path, [double]$Scale = 3, [bool]$Invert = $tr
         $eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
         if (-not $eng) { $eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new('en-US')) }
         if (-not $eng) { return $null }
-        $tmp = Convert-ImageForOcr $path $Scale $Invert
+        $tmp = $null; try { $tmp = Convert-ImageForOcr $path $Scale $Invert } catch { $tmp = (Resolve-Path $path).Path; $Scale = 1.0 }      # formatos que System.Drawing no abre (p. ej. WebP): se lee tal cual con el decodificador de Windows
         $file = Wait-WinRt ([Windows.Storage.StorageFile]::GetFileFromPathAsync($tmp)) ([Windows.Storage.StorageFile])
         $stream = Wait-WinRt ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
         $dec = Wait-WinRt ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])

@@ -103,6 +103,18 @@ function Handle-SenalTomada($ra, $chat = $null, $who = "") {
     return ($L -join "`n")
 }
 
+# Alta directa de una operación abierta (desde /operacion o una captura): se vigila en vivo con parciales en tercios del recorrido hasta el TP indicado.
+function Add-LiveOrder($sym, [int]$sg, [double]$en, [double]$sl, [double]$tp, [double]$mg, [double]$lv, [string]$origen, [string]$who) {
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $all2 = @(Read-Signals); $dirty = $false
+    foreach ($r in $all2) { if ($r.strat -eq 'tomada' -and $r.status -eq 'open' -and $r.sym -eq "${sym}USDT" -and $r.dest -eq 'priv') { $r.status = 'closed'; $r.outcome = 'sustituida por un registro nuevo'; $r.closedAt = $now; $dirty = $true } }
+    if ($dirty) { Save-Signals $all2 }
+    $R = [Math]::Abs($en - $sl); if ($R -le 0) { return }
+    Add-SignalRecord ([ordered]@{
+        id = "tomada-$sym-$now"; time = $now; sym = "${sym}USDT"; src = $null; tf = '4h'; strat = 'tomada'; dest = 'priv'; by = "$who"; chat = ""; side = $sg; entryType = 'market'
+        entry = $en; sl = $sl; sl0 = $sl; tp1 = ($en + $sg * [Math]::Abs($tp - $en) / 3); tp2 = ($en + $sg * 2 * [Math]::Abs($tp - $en) / 3); tp3 = $tp; riskAbs = $R; slPct = ($R / $en * 100); lev = $lv; margin = $mg; status = 'open'; stage = 0; realized = 0.0; age = 0; lastLabel = 0; lab0 = 0
+        cost = 0.0015; outcome = $null; R = $null; net = $null; ctxScore = $null; chkAt = $now; closeNote = ""; origen = $origen; note = "Operación registrada con /$origen"
+    })
+}
 # Vigilancia en vivo de las órdenes tomadas (se llama desde el bucle principal cada ~40 s). Idempotente: cada evento se anota en closeNote.
 function Watch-TakenOrders {
     if (-not $TelegramToken) { return }

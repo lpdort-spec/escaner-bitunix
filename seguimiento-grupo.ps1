@@ -162,7 +162,7 @@ function Review-OpenPositions {
     $slot = [long][Math]::Floor([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() / 14400); if ($slot -eq $script:RpSlot) { return }; $script:RpSlot = $slot
     $mem = @{}; foreach ($kv in ((Get-ReportState "ajustes") -split ',' | Where-Object { $_ -match '=' })) { $p = $kv -split '=', 2; $mem[$p[0]] = $p[1] }
     $tk = $null; $chg = $false
-    foreach ($s in @(Read-Signals | Where-Object { $_.status -eq 'open' -and $_.strat -in 'seg-priv', 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'tomada' })) {
+    foreach ($s in @(Read-Signals | Where-Object { $_.status -eq 'open' -and $_.strat -in 'seg-priv', 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'tomada' -and -not ($_.strat -eq 'tomada' -and $_.origen -eq 'operacion') })) {
         try {
             $dest = Get-RecDest $s; if (-not ($dest.priv -or $dest.group)) { continue }
             $isStock = ($s.src -eq 'yahoo'); $sym = $s.sym -replace 'USDT$', ''; $sg = [int]$s.side

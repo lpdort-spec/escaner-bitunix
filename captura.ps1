@@ -184,7 +184,9 @@ function Handle-Screenshot($token, $m, $chat) {
         $miss = @(); foreach ($k in 'sym', 'entry', 'side') { if (-not $p.$k) { $miss += $k } }
         if ($miss.Count) {
             $got = @(); foreach ($k in 'sym', 'entry', 'mark', 'margin', 'liq', 'sl', 'tp', 'lev') { if ($p.$k) { $got += "$k=$($p.$k)" } }
-            return ("⚠️ No he podido leer con seguridad: {0}.`nHe leído: {1}.`n{2}`nPara que la lea bien: recorta SOLO la tabla de 'Posiciones' (que ocupe toda la imagen) y envíala como ARCHIVO (clip → Archivo, sin comprimir); las fotos normales pierden calidad en Telegram. También puedes añadir el símbolo en el pie (ej. API3) o registrarla con /operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO." -f ($miss -join ', '), $(if ($got.Count) { $got -join ' · ' } else { "nada fiable" }), (($p.notes | ForEach-Object { "· $_" }) -join "`n"))
+            $fv = { param($x, $ph) if ($x) { ("$x" -replace '\.', ',') } else { $ph } }
+            $tpl = "/operacion {0} {1} {2} {3} {4} {5} {6}" -f (& $fv $p.sym 'PAR'), $(if ($p.side -eq 1) { 'LARGO' } elseif ($p.side -eq -1) { 'CORTO' } else { 'LARGO|CORTO' }), (& $fv $p.entry 'ENTRADA'), (& $fv $p.sl 'SL'), (& $fv $p.tp 'TP'), (& $fv $p.margin 'MARGEN'), (& $fv $p.lev 'APALANCAMIENTO')
+            return ("⚠️ No he podido leer con seguridad: {0}.`nHe leído: {1}.`n{2}`nCopia, completa lo que falte (o corrige) y envíame esto:`n$tpl`n`nPara que la lea bien: recorta SOLO la tabla de 'Posiciones' (que ocupe toda la imagen) y envíala como ARCHIVO (clip → Archivo, sin comprimir); las fotos normales pierden calidad en Telegram. También puedes añadir el símbolo en el pie (ej. API3) o registrarla con /operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO." -f ($miss -join ', '), $(if ($got.Count) { $got -join ' · ' } else { "nada fiable" }), (($p.notes | ForEach-Object { "· $_" }) -join "`n"))
         }
         $txt = Format-CapturaAnalysis $p $true "$($m.from.first_name)"
         $warn = @($p.notes | Where-Object { $_ }); if ($warn.Count) { $txt += "`n`nℹ️ Notas de lectura: " + ($warn -join "; ") + ". Si algún dato no coincide con tu pantalla, dímelo." }
