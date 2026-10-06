@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write               # para guardar el estado y el registro de señales
+  actions: write                # para lanzar el relevo inmediato cuando se sube código nuevo
 
 concurrency:
   group: bot
@@ -18,6 +19,8 @@ jobs:
     timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main                 # siempre el código más reciente (un turno en cola no debe arrancar con una versión antigua)
       - name: Bot de Telegram y escáner (turno de 5h45)
         shell: powershell
         env:
@@ -32,3 +35,10 @@ jobs:
           git config user.email "escaner@users.noreply.github.com"
           for f in seen.json signals.jsonl last-report.txt bot-offset.txt; do [ -f "$f" ] && git add "$f"; done
           git diff --cached --quiet || (git commit -m "estado" && git pull --rebase -q && git push)
+      - name: Relevo inmediato si hay código nuevo
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -f restart.flag ]; then gh workflow run scan.yml --ref main || true; fi
