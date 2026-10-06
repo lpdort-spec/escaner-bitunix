@@ -69,7 +69,7 @@ function Score-Momento([int]$sg, $a4, $a1, $tvR, [double]$px, $sentVal, $fund) {
             $ob = @(if ($sg -eq 1) { $ress | Where-Object { $_.p -gt $entry } | Sort-Object { $_.p } | Select-Object -First 1 } else { $sups | Where-Object { $_.p -lt $entry } | Sort-Object { $_.p } -Descending | Select-Object -First 1 })
             $room = if ($ob) { [Math]::Abs($ob[0].p - $entry) / $R } else { 99.0 }
             if ($room -ge 3) { & $add 2 ("Espacio hasta el siguiente obstáculo: {0}R" -f $(if ($room -ge 99) { ">3" } else { "{0:N1}" -f $room })) } elseif ($room -ge 2) { & $add 1 ("Espacio hasta el siguiente obstáculo: {0:N1}R" -f $room) } elseif ($room -ge 1.5) { & $add 0 ("Espacio justo hasta el obstáculo: {0:N1}R" -f $room) } else { & $add -2 ("Obstáculo muy cerca ({0:N1}R): recorrido cortado" -f $room) }
-            $plan = @{ entry = $entry; sl = $sl; R = $R; tp1 = $entry + $sg * $R; tp2 = $entry + $sg * 2 * $R; tp3 = $entry + $sg * 3 * $R; ob = $(if ($ob) { $ob[0].p } else { $null }); room = $room; pullback = ($entry -ne $px) }
+            $plan = @{ atr4h = $atr; entry = $entry; sl = $sl; R = $R; tp1 = $entry + $sg * $R; tp2 = $entry + $sg * 2 * $R; tp3 = $entry + $sg * 3 * $R; ob = $(if ($ob) { $ob[0].p } else { $null }); room = $room; pullback = ($entry -ne $px) }
         }
     }
     return @{ score = $script:__pts; fx = @($script:__fx); plan = $plan; dir = $dir }

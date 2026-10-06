@@ -32,7 +32,7 @@ function Get-SignalScore($sym, $kind, [int]$sg, [double]$px, $exch = '') {      
         if ($sg -eq 1) { return [int]$sc.lg.score } else { return [int]$sc.st.score }
     } catch { return $null }
 }
-function Format-CompactSignal([int]$sg, $title, $score, [double]$entry, [bool]$limit, $lev, [double]$sl, [double]$tp1, [double]$tp2, [double]$tp3, $kind, $tf = '4h') {
+function Format-CompactSignal([int]$sg, $title, $score, [double]$entry, [bool]$limit, $lev, [double]$sl, [double]$tp1, [double]$tp2, [double]$tp3, $kind, $tf = '4h', $note = $null) {
     $icon = if ($sg -eq 1) { "🟢" } else { "🔴" }; $dir = if ($sg -eq 1) { "LARGO" } else { "CORTO" }; $st = Get-OrderStyle $tf
     $L = @()
     $L += $st.banner
@@ -43,5 +43,6 @@ function Format-CompactSignal([int]$sg, $title, $score, [double]$entry, [bool]$l
     if ($lev -and $slPct -gt 0) { $L += ("SL: {0} (si salta, ≈ {1:N0}% del margen)" -f (TaFp $sl), ($slPct * [double]$lev)) } else { $L += ("SL: {0}" -f (TaFp $sl)) }
     if ($slPct -gt (Get-SlMaxPct)) { $L += ("⚠️ SL a {0:N1}% del precio: supera el {1:N0}% del margen incluso sin apalancar; reduce el tamaño de la posición." -f $slPct, (Get-SlMaxPct)) }
     $L += ("TP1: {0} · TP2: {1} · TP final: {2}" -f (TaFp $tp1), (TaFp $tp2), (TaFp $tp3))
+    foreach ($nt in @($note)) { if ($nt) { $L += "ℹ️ $nt" } }
     return ($L -join "`n")
 }

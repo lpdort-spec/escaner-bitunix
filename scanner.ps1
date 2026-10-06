@@ -349,7 +349,8 @@ function Scan($iv) {
             $rbTxt = ("Riesgo/beneficio: TP1 1:1 · TP2 1:2 · TP3 1:3 · plan completo 1:{0:N1}`nAcierto mínimo para no perder (comisiones incl.): {1:N0}% si el objetivo es TP2 · {2:N0}% con el plan completo`nLiquidación aprox.: {3} ({4:N1}% desde la entrada); el SL queda al {5:N0}% de ese camino {6}" -f $rPlan, $pBe2, $pBeP, (Fmt $liqPx), $liqDist, $slShare, $(if ($slShare -le 50) { "✅" } else { "⚠️" }))
             # --- Señal COMPACTA (la misma para el chat privado de Bitunix y para Alertas Mercados): puntuación, entrada, apalancamiento, SL y TP. El detalle se pide con /informe o /momento. ---
             $scSig = Get-SignalScore $name 'cripto' $sgn ([double]$entry)
-            $msg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto' $iv
+            $slNote = $null; try { if (Get-Command Get-SlClusterNote -ErrorAction SilentlyContinue) { $slNote = Get-SlClusterNote $sgn $name $entry $sl $atr ([double]$entry) } } catch {}      # solo advertencia: el SL de las rupturas está validado en backtest y no se modifica
+            $msg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto' $iv $slNote
             $genMsg = $null
             if ($iv -eq "4h" -and $strat -eq "ruptura" -and $script:MktChat) { $genMsg = $msg }
             $photo = $null

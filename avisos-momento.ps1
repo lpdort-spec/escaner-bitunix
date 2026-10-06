@@ -62,9 +62,9 @@ function Get-OrderLevels($side, $plan, $kind, $score = $null, $tmg = 0) {      #
         if ($sg * ($ob - $en) -gt 1.05 * $R) { $fin = $ob - $sg * 0.1 * $R; if ($sg * ($t3 - $fin) -gt 0) { $t3 = $fin }; if ($sg * ($t2 - $t3) -ge 0) { $t2 = ($t1 + $t3) / 2 } } }
     return @{ sg = $sg; entry = $en; sl = $sl; t1 = $t1; t2 = $t2; t3 = $t3; slPct = $slPct; lev = (Get-SuggestedLev $slPct $kind $score $tmg) }
 }
-function Build-MomAlert($kind, $sym, $side, $score, $plan = $null, [switch]$Priv) {
+function Build-MomAlert($kind, $sym, $side, $score, $plan = $null, $notes = $null) {
     $lv = Get-OrderLevels $side $plan $kind $score; if (-not $lv) { return $null }
-    return (Format-CompactSignal $lv.sg ($(if ($kind -eq 'cripto') { "$sym/USDT" } else { "$sym" })) $score $lv.entry ([bool]$plan.pullback) $lv.lev $lv.sl $lv.t1 $lv.t2 $lv.t3 $kind $(if ($kind -eq 'cripto') { '4h' } else { '1d' }))
+    return (Format-CompactSignal $lv.sg ($(if ($kind -eq 'cripto') { "$sym/USDT" } else { "$sym" })) $score $lv.entry ([bool]$plan.pullback) $lv.lev $lv.sl $lv.t1 $lv.t2 $lv.t3 $kind $(if ($kind -eq 'cripto') { '4h' } else { '1d' }) $notes)
 }
 function Register-MomSignal($kind, $sym, $lv, $plan) {      # cada aviso emitido queda registrado: se vigila (cambios de lectura, nuevos SL/TP) igual que las rupturas
     try {
@@ -97,7 +97,13 @@ function Invoke-MomItems($kind, $items, [switch]$Dry) {
                     $plan = if ($side -eq 'L') { $sc.lg.plan } else { $sc.st.plan }
                     # entrada limit en un retroceso lejos del precio actual: no se emite (no es operable ahora); se reevalua en el siguiente cierre
                     if ($plan.pullback -and $s.price -and [Math]::Abs([double]$plan.entry - [double]$s.price) / [double]$s.price * 100 -gt 1.5) { continue }
-                    $msg = Build-MomAlert $kind $sym $side $score $plan; if (-not $msg) { continue }
+                    # SL frente a EMAs/soportes de 1h, 4h y 1d (largos y cortos), EMAs como obstáculo del TP y contexto de EMAs clave (cripto)
+                    $slx = $null
+                    if ($kind -eq 'cripto' -and (Get-Command Apply-SlStructure -ErrorAction SilentlyContinue)) {
+                        try { $slx = Apply-SlStructure $plan $side $sym ([double]$s.price) } catch {}
+                        if ($slx) { if ($slx.skip) { continue }; $score = $score + [int]$slx.delta; if ($score -lt $thr) { continue } }
+                    }
+                    $msg = Build-MomAlert $kind $sym $side $score $plan @($slx.note, $slx.ctx); if (-not $msg) { continue }
                     if ($kind -eq 'cripto') { Send-ToSignalChats $msg }
                     if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $msg $null }
                     try { Register-MomSignal $kind $sym (Get-OrderLevels $side $plan $kind $score) $plan } catch {}
