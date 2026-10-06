@@ -91,6 +91,28 @@ function Get-MktSetup($b) {
     return @{ tkr = $b.tkr; side = $sgn; level = $lvl; entry = $lim; sl = $sl; R = $R; tp1 = $lim + $sgn * $R; tp2 = $lim + $sgn * 2 * $R; tp3 = $lim + $sgn * 3 * $R; px = $px; atr = $atr; ratio = $ratio; wk = $wc; room = $room; barTime = $b.t[$i]; rsi = $rsi }
 }
 
+# ---------- aviso informativo: cruce al alza de la EMA200 con volumen comprador (sesión diaria cerrada) ----------
+# Backtest (348 activos, ~10 años): 54% llegan a TP1 y esperanza +0,1R aun con volumen y vela compradora: ventaja casi nula -> se avisa como CONTEXTO, sin plan de entrada, SL ni TP.
+function Get-Ema200Cross($b) {
+    $n = $b.n; if ($n -lt 230) { return $null }; $i = $n - 1; $c = $b.c; $o = $b.o; $h = $b.h; $l = $b.l; $v = $b.v
+    $k = 2.0 / 201; $ema = New-Object 'double[]' $n; $ema[0] = $c[0]; for ($q = 1; $q -lt $n; $q++) { $ema[$q] = $c[$q] * $k + $ema[$q - 1] * (1 - $k) }
+    if (-not ($c[$i] -gt $ema[$i] -and $c[$i - 1] -le $ema[$i - 1])) { return $null }
+    $sv = 0.0; for ($q = $i - 20; $q -lt $i; $q++) { $sv += $v[$q] }; $av = $sv / 20; if ($av -le 0) { return $null }; $vr = $v[$i] / $av; if ($vr -lt 1.5) { return $null }
+    $rng = $h[$i] - $l[$i]; if ($rng -le 0) { return $null }; $pos = ($c[$i] - $l[$i]) / $rng; if (-not ($c[$i] -gt $o[$i] -and $pos -ge 0.6)) { return $null }
+    $up = 0.0; $dn = 0.0; for ($q = $i - 4; $q -le $i; $q++) { if ($c[$q] -ge $o[$q]) { $up += $v[$q] } else { $dn += $v[$q] } }; if ($up -le $dn) { return $null }
+    $st = 0.0; for ($q = $i - 14; $q -lt $i; $q++) { $st += [Math]::Max($h[$q] - $l[$q], [Math]::Max([Math]::Abs($h[$q] - $c[$q - 1]), [Math]::Abs($l[$q] - $c[$q - 1]))) }; $atr = $st / 14; if ($atr -gt 0 -and ($c[$i] - $ema[$i]) -gt 1.5 * $atr) { return $null }
+    $rsi = (Mkt-Rsi $c)[$i]; $wk = $null; try { $W = Mkt-Weekly $b; $wk = Mkt-WeeklyContext $W $c[$i] } catch {}
+    return @{ tkr = $b.tkr; px = $c[$i]; ema = $ema[$i]; vr = $vr; pos = $pos; rsi = $rsi; upDn = ($up / [Math]::Max($dn, 1)); wk = $wk; barTime = $b.t[$i] }
+}
+function Build-Ema200Message($b, $x) {
+    $kind = if ($b.kind -eq "ETF") { "ETF" } elseif ($b.kind -eq "INDEX") { "ÍNDICE" } elseif ($b.kind -in "CURRENCY", "FUTURE", "CRYPTOCURRENCY") { "$($b.kind)" } else { "ACCIÓN" }
+    $L = @(); $L += ("📈 ROMPE LA EMA200 AL ALZA · {0} · {1}" -f $x.tkr, $kind); if ($b.name -and $b.name -ne $x.tkr) { $L += "   $($b.name)" }
+    $L += ("Cierre diario {0} sobre la EMA200 ({1}), +{2:N1}% por encima; el día anterior cerró por debajo." -f (MktF $x.px $b.cur), (MktF $x.ema $b.cur), (($x.px / $x.ema - 1) * 100))
+    $L += ("Volumen {0:N1}x la media de 20 sesiones · vela alcista cerrando en el {1:N0}% alto del rango · RSI {2:N0}" -f $x.vr, ($x.pos * 100), $x.rsi)
+    if ($x.wk -and $x.wk.ok) { $L += ("Tendencia semanal: {0} · estructura semanal: {1}" -f $(switch ($x.wk.trend) { 'up' { 'alcista' } 'down' { 'bajista' } default { 'lateral' } }), $(switch ($x.wk.struct) { 'up' { 'alcista' } 'down' { 'bajista' } default { 'mixta' } })); if ($null -ne $x.wk.resLv) { $L += ("Primera resistencia semanal: {0} ({1:+0.0;-0.0}%)" -f (MktF $x.wk.resLv $b.cur), (($x.wk.resLv / $x.px - 1) * 100)) } }
+    $L += ""; $L += "⚠️ AVISO INFORMATIVO, NO ES UNA SEÑAL DE ENTRADA (sin SL ni TP). En el histórico (348 activos, ~10 años) este patrón, incluso con volumen comprador, solo llegó a su primer objetivo en el 54% de los casos con una ventaja media de +0,1R: casi una moneda al aire. Úsalo como contexto y confírmalo con /informe $($x.tkr) o /momento $($x.tkr)."
+    return ($L -join "`n")
+}
 function MktF($x, $cur) { if ($x -ge 100) { return ("{0:N2}" -f $x) } elseif ($x -ge 1) { return ("{0:N3}" -f $x) } else { return ("{0:G5}" -f $x) } }
 function Build-MktMessage($b, $s) {      # señal COMPACTA: puntuación, entrada, apalancamiento orientativo, SL y TP. El detalle se pide con /informe SIMBOLO.
     $sg = $s.side; $slPct = [Math]::Abs($s.sl / $s.entry - 1) * 100
@@ -100,10 +122,13 @@ function Build-MktMessage($b, $s) {      # señal COMPACTA: puntuación, entrada
 }
 # ---------- barrido diario del universo ----------
 function Scan-Market([switch]$Dry) {
-    $found = 0; $scanned = 0; $mkt = $null
+    $found = 0; $scanned = 0; $mkt = $null; $script:Ema200Sent = 0
     foreach ($tkr in $script:UniTodos) {
         if (($script:cmdTick++ % 10) -eq 0) { try { Poll-Commands } catch {} }
         $b = Get-MktBars $tkr; Start-Sleep -Milliseconds 120; if (-not $b) { continue }; $scanned++
+        try { $ex = Get-Ema200Cross $b      # aviso informativo (una vez por sesión: el barrido diario corre una sola vez al día)
+            if ($ex) { $em = Build-Ema200Message $b $ex; if ($Dry) { $script:MktDryOut += ,@($tkr, $em) } elseif ($script:MktChat -and $TelegramToken -and $script:Ema200Sent -lt 8) { Send-Tg $TelegramToken $script:MktChat $em $null; $script:Ema200Sent++ } }
+        } catch {}
         $s = Get-MktSetup $b; if (-not $s) { continue }
         $key = "mkt-$tkr-1d-$($s.barTime)"
         if (@(Read-Signals | Where-Object { $_.id -eq $key }).Count) { continue }
@@ -129,7 +154,7 @@ function Send-MarketScanIfDue {               # laborables a partir de las 22:30
     Set-ReportState "mercado" $today
     $found = Scan-Market
     # aviso SOLO al chat privado de Luis: resumen del escaneo y, la primera vez, confirmación de que Alertas Mercados está operativo
-    $resumen = "🌍 Escaneo diario de mercado (acciones y ETFs, velas diarias) completado: $($script:MktLastScanned) activos analizados, $found señal(es) nueva(s) enviada(s) al grupo Alertas Mercados."
+    $resumen = "🌍 Escaneo diario de mercado (acciones y ETFs, velas diarias) completado: $($script:MktLastScanned) activos analizados, $found señal(es) nueva(s) enviada(s) al grupo Alertas Mercados y $($script:Ema200Sent) aviso(s) informativo(s) de ruptura de la EMA200."
     if ($script:MktLastScanned -lt 100) { $resumen += " ⚠️ Pocos activos respondieron (Yahoo Finance puede estar limitando): revisa mañana."; }
     try { Send-ToSignalChats $resumen } catch {}
     if (-not (Get-ReportState "mercadook") -and $script:MktLastScanned -ge 100) {

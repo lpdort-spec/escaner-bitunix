@@ -53,8 +53,11 @@ function Read-PositionOnce([string]$path, [string]$captionSym, [double]$sc0, [bo
     $p = @{ notes = @() }
     $find = { param($rx) @($rows | Where-Object { $_.t -match $rx } | Select-Object -First 1)[0] }
     $below = { param($h, $dx = 70) if (-not $h) { return $null }; @($rows | Where-Object { $_.y -gt $h.y + 8 * $f -and $_.y -lt $h.y + 80 * $f -and [Math]::Abs($_.x - $h.x) -le ($dx * $f + 25) } | Sort-Object y, x | Select-Object -First 1)[0] }
+    # modo de margen (Aislado / Cruzada) junto al símbolo
+    $modeRow = @($rows | Where-Object { $_.y -lt 110 -and $_.t -match '(?i)\b(cruzad[ao]|aislad[ao]|cross|isolated)\b' } | Select-Object -First 1)[0]
+    if ($modeRow) { $p.mode = $(if ($modeRow.t -match '(?i)cruzad|cross') { 'cruzada' } else { 'aislada' }) }
     # símbolo
-    $symRow = @($rows | Where-Object { $_.y -lt 110 -and $_.t -match '(?i)[A-Z0-9]{2,12}\s*USDT' } | Select-Object -First 1)[0]
+    $symRow =@($rows | Where-Object { $_.y -lt 110 -and $_.t -match '(?i)[A-Z0-9]{2,12}\s*USDT' } | Select-Object -First 1)[0]
     $tick = @((Invoke-RestMethod "$($script:CmdBase)/tickers" -TimeoutSec 20).data)
     $bases = @($tick | ForEach-Object { $_.symbol -replace 'USDT$', '' })
     if ($captionSym) { $p.sym = ($captionSym.ToUpper() -replace 'USDT$', '') }
@@ -101,6 +104,7 @@ function Format-CapturaAnalysis($p, [bool]$register, [string]$who) {
     $sym = $p.sym; $sg = [int]$p.side; $dir = if ($sg -eq 1) { "LARGO" } else { "CORTO" }; $en = [double]$p.entry; $px = if ($p.live) { [double]$p.live } else { [double]$p.mark }
     $sl = $p.sl; $tp = $p.tp; $lev = $p.lev; $mg = $p.margin; $L = @()
     $L += ("📸 CAPTURA LEÍDA · {0} {1}{2} · entrada {3} · ahora {4}{5}{6}{7}" -f $sym, $dir, $(if ($lev) { " x$lev" } else { "" }), (TaFp $en), (TaFp $px), $(if ($mg) { " · margen {0:N0} USDT" -f $mg } else { "" }), $(if ($p.liq) { " · liq. " + (TaFp $p.liq) } else { "" }), "")
+    if ($p.mode -eq 'cruzada') { $L = @("🚨 MARGEN CRUZADO: tu regla es operar SIEMPRE en AISLADO. En cruzado, un movimiento brusco puede arrastrar el resto de tu cuenta. Cámbialo a aislado desde el icono de margen de esa posición.") + $L }
     $L += ("   SL: {0} · TP: {1}" -f $(if ($sl) { TaFp $sl } else { "⛔ NO TIENE" }), $(if ($tp) { TaFp $tp } else { "sin TP" }))
     $pct = $sg * ($px / $en - 1) * 100; $L += ("   Resultado ahora: {0:+0.00;-0.00}% del precio{1}" -f $pct, $(if ($lev) { " (≈ {0:+0.0;-0.0}% del margen)" -f ($pct * $lev) } else { "" }))
     $a = Get-CaptureAtr $sym; $atr = if ($a) { [double]$a.atr } else { 0.0 }
