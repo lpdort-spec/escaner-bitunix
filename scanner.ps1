@@ -466,6 +466,7 @@ function Test-CodeUpdated {
     } catch {}
     return $false
 }
+try { if ((Get-Command Test-OcrAvailable -ErrorAction SilentlyContinue) -and $TelegramToken) { if (Test-OcrAvailable) { Write-Host "  [OCR] disponible: el análisis por captura de pantalla está activo." -ForegroundColor DarkGray } else { Send-ToSignalChats "⚠️ El análisis por captura de pantalla NO está disponible en el servidor (el OCR de Windows no funciona aquí). Mientras tanto usa /operacion o /señal tomada." } } } catch {}
 try { Import-ManualTrades (Join-Path $PSScriptRoot "operaciones-manuales.json") } catch {}
 try { Import-GroupTracking (Join-Path $PSScriptRoot "seguimiento-grupo.json") } catch {}      # tus operaciones reales entran en el seguimiento (solo se importan una vez)
 do {

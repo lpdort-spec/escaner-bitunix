@@ -278,8 +278,17 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
     try { $u = Invoke-RestMethod -Uri "https://api.telegram.org/bot$token/getUpdates?offset=$off&timeout=0&allowed_updates=%5B%22message%22%5D" -TimeoutSec 25 } catch { return }
     foreach ($up in $u.result) {
         Set-Content $offsetFile ([string]($up.update_id + 1))
-        $m = $up.message; if (-not $m -or -not $m.text) { continue }
+        $m = $up.message; if (-not $m) { continue }
         $chat = "$($m.chat.id)"
+        # captura de pantalla (solo chat privado de Luis): el bot lee la posición y la analiza
+        if (-not $m.text -and ($m.photo -or ($m.document -and "$($m.document.mime_type)" -like 'image/*'))) {
+            if ($chat -notin $allowedChats -or ($script:PrivateChats -and $chat -notin $script:PrivateChats)) { continue }
+            if (-not (Get-Command Handle-Screenshot -ErrorAction SilentlyContinue)) { continue }
+            Send-Tg $token $chat "⏳ Leyendo la captura y analizando la operación..." $m.message_id
+            $rep = try { Handle-Screenshot $token $m $chat } catch { "No he podido analizar la captura: $($_.Exception.Message)" }
+            Send-Tg $token $chat $rep $null; continue
+        }
+        if (-not $m.text) { continue }
         if ($m.text.Trim().ToLower() -match '^/id(@\w+)?$') { Send-Tg $token $chat ("🆔 Identificador de este chat: {0} (tipo: {1}). Si quieres que el bot envíe aquí las señales, díselo a Luis." -f $chat, $m.chat.type) $m.message_id; continue }
         if ($chat -notin $allowedChats) { continue }
         $t = $m.text.Trim(); if (-not $t.StartsWith("/")) { continue }
@@ -352,6 +361,8 @@ if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PS
 if (Test-Path (Join-Path $PSScriptRoot "senal-compacta.ps1")) { . (Join-Path $PSScriptRoot "senal-compacta.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "control-riesgo.ps1")) { . (Join-Path $PSScriptRoot "control-riesgo.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-tomada.ps1")) { . (Join-Path $PSScriptRoot "senal-tomada.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "ocr.ps1")) { . (Join-Path $PSScriptRoot "ocr.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "captura.ps1")) { . (Join-Path $PSScriptRoot "captura.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "busqueda.ps1")) { . (Join-Path $PSScriptRoot "busqueda.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "noticias.ps1")) { . (Join-Path $PSScriptRoot "noticias.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "fundamentales.ps1")) { . (Join-Path $PSScriptRoot "fundamentales.ps1") }
