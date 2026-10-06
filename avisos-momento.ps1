@@ -75,7 +75,7 @@ function Register-MomSignal($kind, $sym, $lv, $plan) {      # cada aviso emitido
 function Invoke-MomItems($kind, $items, [switch]$Dry) {
     $thr = [int](Get-MomCfg 'umbralMomento' 7); $act = @(Get-MomAct); $sent = 0; $cap = 8; $sigAll = @(); try { $sigAll = @(Read-Signals | Where-Object { $_.strat -eq 'aviso-momento' }) } catch {}
     foreach ($it in $items) {
-        if (($script:cmdTick++ % 10) -eq 0) { try { Poll-Commands } catch {} }
+        if (($script:cmdTick++ % 10) -eq 0) { try { Poll-Commands } catch {}; try { Watch-TakenOrders } catch {} }
         try {
             if ($kind -eq 'cripto') { $s = @{ src = 'bitunix'; sym = $it.sym; name = "$($it.sym)/USDT"; currency = 'USDT'; exch = ''; price = $it.px; extra = @{ funding = $it.fund } } }
             else { $s = Get-YahooSeries $it }

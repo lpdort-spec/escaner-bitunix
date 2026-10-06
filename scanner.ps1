@@ -453,6 +453,19 @@ function Run-SweepObsIfDue {                       # solo cuando acaba de cerrar
 
 Write-Host "Buscando setups de alto potencial en top $TopN pares Bitunix ($($Interval -join ', ')) [$($Strategies -join ', ')] cada $EverySeconds s. Ctrl+C para parar." -ForegroundColor Cyan
 $script:startAt = Get-Date
+# Recarga automática del código: si se sube algo nuevo al repositorio, el turno guarda el estado y se reinicia solo con el código nuevo (sin esperar horas).
+$script:RestartNow = $false; $script:codeChk = Get-Date; $script:codeSha = ""
+try { $script:codeSha = "$((git -C $PSScriptRoot rev-parse HEAD 2>$null) | Select-Object -First 1)".Trim() } catch {}
+function Test-CodeUpdated {
+    if ($script:codeSha.Length -lt 30) { return $false }
+    if (((Get-Date) - $script:codeChk).TotalSeconds -lt 120 -or ((Get-Date) - $script:startAt).TotalMinutes -lt 3) { return $false }
+    $script:codeChk = Get-Date
+    try {
+        $r = "$((git -C $PSScriptRoot ls-remote origin refs/heads/main 2>$null) | Select-Object -First 1)".Trim()
+        if ($r.Length -ge 40 -and $r.Substring(0, 40) -ne $script:codeSha) { Write-Host "Código nuevo en el repositorio ($($r.Substring(0, 7))): guardo el estado y reinicio con la versión actualizada." -ForegroundColor Yellow; return $true }
+    } catch {}
+    return $false
+}
 try { Import-ManualTrades (Join-Path $PSScriptRoot "operaciones-manuales.json") } catch {}
 try { Import-GroupTracking (Join-Path $PSScriptRoot "seguimiento-grupo.json") } catch {}      # tus operaciones reales entran en el seguimiento (solo se importan una vez)
 do {
@@ -473,5 +486,7 @@ do {
     try { Send-DailyReport } catch {}
     try { Send-WeeklyReport } catch {}
     Write-Host ("{0} pasada completada" -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor DarkGray
-    if (-not $Once) { $until = (Get-Date).AddSeconds($EverySeconds); while ((Get-Date) -lt $until) { Poll-Commands; Start-Sleep -Seconds 6 } } else { Poll-Commands }
-} while (-not $Once -and ($MaxMinutes -le 0 -or ((Get-Date) - $script:startAt).TotalMinutes -lt $MaxMinutes))
+    if (-not $Once) { $until = (Get-Date).AddSeconds($EverySeconds); while ((Get-Date) -lt $until) { Poll-Commands; try { Watch-TakenOrders } catch {}; if (Test-CodeUpdated) { $script:RestartNow = $true; break }; Start-Sleep -Seconds 6 } } else { Poll-Commands }
+    if (-not $script:RestartNow -and -not $Once) { try { if (Test-CodeUpdated) { $script:RestartNow = $true } } catch {} }
+} while (-not $Once -and -not $script:RestartNow -and ($MaxMinutes -le 0 -or ((Get-Date) - $script:startAt).TotalMinutes -lt $MaxMinutes))
+if ($script:RestartNow) { try { Set-Content -Path (Join-Path $PSScriptRoot "restart.flag") -Value "1" } catch {} }

@@ -29,7 +29,7 @@ function Update-Signals($base) {
     $sigs = Read-Signals; if ($sigs.Count -eq 0) { return }
     $changed = $false
     foreach ($s in $sigs) {
-        if ($s.status -in 'closed', 'unfilled') { continue }
+        if ($s.status -in 'closed', 'unfilled' -or $s.strat -eq 'tomada') { continue }      # las órdenes tomadas por el usuario se vigilan en vivo (senal-tomada.ps1)
         if ($s.src -eq "yahoo") {      # acciones/ETFs: velas diarias cerradas de Yahoo Finance (la etiqueta de cada vela es el inicio de su sesión)
             if (-not (Get-Command Get-MktClosedForTracker -ErrorAction SilentlyContinue)) { continue }
             $closed = @(Get-MktClosedForTracker $s.sym); if ($closed.Count -eq 0) { continue }
@@ -97,7 +97,7 @@ function Group-Stats($items, $label) {
 }
 
 function Get-Report {
-    $all = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' -and $_.strat -ne 'seg-grupo' -and $_.strat -ne 'seg-priv' -and $_.strat -ne 'momento-obs' -and $_.strat -ne 'aviso-momento' })      # manuales, observación y mercado se informan aparte
+    $all = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' -and $_.strat -ne 'seg-grupo' -and $_.strat -ne 'seg-priv' -and $_.strat -ne 'momento-obs' -and $_.strat -ne 'aviso-momento' -and $_.strat -ne 'tomada' })      # manuales, observación y mercado se informan aparte
     $cl = @($all | Where-Object { $_.status -eq 'closed' })
     $open = @($all | Where-Object { $_.status -in 'open', 'pending' }).Count
     $un = @($all | Where-Object { $_.status -eq 'unfilled' }).Count

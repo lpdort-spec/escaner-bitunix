@@ -291,7 +291,12 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
                 $h = $script:HelpText; if (-not $script:PrivateChats -or $chat -in $script:PrivateChats) { $h = $h.Replace("/ayuda · esta ayuda", "/resultados · informe diario sencillo (señales + tus operaciones manuales); también llega solo cada día a las 22:00 (hora de España)`n/semanal · informe semanal profundo con análisis de los fallos; también llega solo los domingos a las 22:00`n/operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · registra una operación tuya en el seguimiento y la pasa por tu control de riesgo (margen, coste del SL, lectura del mercado, reentradas)`n/mercado · prueba en seco del escáner de acciones/ETFs (no envía nada al grupo)`n/cerrar PAR PRECIO · registra el cierre manual de una operación tuya`n/señal tomada [PAR] PRECIO [xAPAL] · me dices que tomaste una señal mía a ese precio: la valoro y la vigilo (cerrar, subir SL/TP, cierre parcial)`n/señal cerrada PAR [PRECIO] · dejo de vigilar esa operación`n(estos 6 comandos solo funcionan en este chat privado)`n/ayuda · esta ayuda") }
                 Send-Tg $token $chat $h $m.message_id
             }
-            { $_ -in "/resultados", "/semanal", "/operacion", "/cerrar", "/mercado", "/seÃ±al", "/senal" } {
+            { $_ -in "/señal", "/senal" } {
+                if ($script:PrivateChats -and $chat -notin $script:PrivateChats -and "$chat" -ne "$($script:MktChat)") { Send-Tg $token $chat "Este comando solo está disponible en el chat privado de Luis y en el grupo Alertas Mercados." $m.message_id; break }
+                $who = ""; try { $who = "$($m.from.first_name)" } catch {}
+                Send-Tg $token $chat (Handle-SenalTomada $args1 $chat $who) $m.message_id
+            }
+            { $_ -in "/resultados", "/semanal", "/operacion", "/cerrar", "/mercado" } {
                 if ($script:PrivateChats -and $chat -notin $script:PrivateChats) { Send-Tg $token $chat "Este comando solo está disponible en el chat privado de Luis. Aquí puedes usar /informe, /precio y /riesgo." $m.message_id; break }
                 switch ($cmd) {
                     "/resultados" { $rep = try { if (Get-Command Get-DailyReport -ErrorAction SilentlyContinue) { Get-DailyReport } else { Get-Report } } catch { "Aún no hay resultados registrados." }; Send-Tg $token $chat $rep $m.message_id }
@@ -307,9 +312,7 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
                         foreach ($d in $script:MktDryOut) { Send-Tg $token $chat ("🧪 PRUEBA (no enviada al grupo)`n`n" + $d[1]) $null }
                     }
                     "/operacion" { Send-Tg $token $chat (Register-ManualFromArgs $args1) $m.message_id }
-                    "/cerrar" { Send-Tg $token $chat (Close-ManualFromArgs $args1) $m.message_id }
-                    { $_ -in "/seÃ±al", "/senal" } { Send-Tg $token $chat (Handle-SenalTomada $args1) $m.message_id }
-                }
+                    "/cerrar" { Send-Tg $token $chat (Close-ManualFromArgs $args1) $m.message_id }                }
             }
             "/precio" {
                 if (-not $args1) { Send-Tg $token $chat "Uso: /precio SIMBOLO (ej. /precio BTC o /precio AAPL)" $m.message_id; break }

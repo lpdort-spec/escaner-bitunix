@@ -150,6 +150,7 @@ function Check-SignalHealth {
 $script:RpSlot = 0
 function Get-RecDest($s) {
     $isStock = ($s.src -eq 'yahoo')
+    if ($s.strat -eq 'tomada') { return @{ priv = ($s.dest -ne 'group'); group = ($s.dest -eq 'group') } }
     if ($s.strat -eq 'seg-priv' -or $s.manual -eq $true) { return @{ priv = $true; group = $false } }
     if ($s.strat -in 'seg-grupo', 'ruptura-mercado') { return @{ priv = $false; group = $true } }
     if ($s.strat -eq 'aviso-momento') { if ($isStock) { return @{ priv = $false; group = $true } } else { return @{ priv = $true; group = $true } } }
@@ -161,7 +162,7 @@ function Review-OpenPositions {
     $slot = [long][Math]::Floor([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() / 14400); if ($slot -eq $script:RpSlot) { return }; $script:RpSlot = $slot
     $mem = @{}; foreach ($kv in ((Get-ReportState "ajustes") -split ',' | Where-Object { $_ -match '=' })) { $p = $kv -split '=', 2; $mem[$p[0]] = $p[1] }
     $tk = $null; $chg = $false
-    foreach ($s in @(Read-Signals | Where-Object { $_.status -eq 'open' -and $_.strat -in 'seg-priv', 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo' })) {
+    foreach ($s in @(Read-Signals | Where-Object { $_.status -eq 'open' -and $_.strat -in 'seg-priv', 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'tomada' })) {
         try {
             $dest = Get-RecDest $s; if (-not ($dest.priv -or $dest.group)) { continue }
             $isStock = ($s.src -eq 'yahoo'); $sym = $s.sym -replace 'USDT$', ''; $sg = [int]$s.side
@@ -194,7 +195,7 @@ function Review-OpenPositions {
                 }
             }
             if ($msgs.Count) {
-                $own = if ($s.strat -eq 'seg-priv') { "TU OPERACIÓN" } else { "LA ORDEN EMITIDA" }
+                $own = if ($s.strat -in 'seg-priv', 'tomada') { "TU OPERACIÓN" } else { "LA ORDEN EMITIDA" }
                 $txt = (("📌 GESTIÓN DE {0} · {1} {2} · precio {3} (entrada {4})`n" -f $own, $sym, $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), (TaFp $px), (TaFp $en)) + ($msgs -join "`n") + "`nEl bot no modifica ninguna orden: decides tú. Son sugerencias de estructura de 4h, no garantías.")
                 if ($dest.priv) { Send-ToSignalChats $txt }; if ($dest.group -and $script:MktChat) { Send-Tg $TelegramToken $script:MktChat $txt $null }
             }
