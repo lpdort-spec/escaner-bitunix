@@ -258,8 +258,9 @@ function Register-ManualFromArgs($ra) {
     if ($sg * ($sl - $en) -ge $sg * ($tp - $en)) { return "El SL queda más allá del TP; revisa los datos." }
     $ok = $false; try { $ok = [bool](Invoke-RestMethod "$($script:CmdBase)/tickers?symbols=${symR}USDT" -TimeoutSec 15).data } catch {}
     if (-not $ok) { return "No encuentro ${symR}USDT en Bitunix, y el seguimiento usa sus velas. No registro la operación." }
+    $chk = ""; try { if (Get-Command Get-RiskCheck -ErrorAction SilentlyContinue) { $chk = "`n`n" + (Get-RiskCheck $symR $sg $en $sl $tp $mg $lv) } } catch {}
     $r = Register-ManualTrade $symR $sg $en $sl $tp $mg $lv
-    return ("✅ Operación {0}: {1} {2} x{3:N0} · entrada {4} · SL {5} · TP {6} · margen {7:N2} USDT.`nQueda en el seguimiento: se resolverá sola con las velas de 1h (SL o TP) y saldrá en el informe diario y semanal. Si la cierras a mano, avísame con /cerrar {1} PRECIO." -f $r.action, $symR, $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), $lv, (Fpx $en), (Fpx $sl), (Fpx $tp), $mg)
+    return ("✅ Operación {0}: {1} {2} x{3:N0} · entrada {4} · SL {5} · TP {6} · margen {7:N2} USDT.`nQueda en el seguimiento: se resolverá sola con las velas de 1h (SL o TP) y saldrá en el informe diario y semanal. Si la cierras a mano, avísame con /cerrar {1} PRECIO." -f $r.action, $symR, $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), $lv, (Fpx $en), (Fpx $sl), (Fpx $tp), $mg) + $chk
 }
 function Close-ManualFromArgs($ra) {
     $uso = "Uso: /cerrar PAR PRECIO_DE_SALIDA`nEjemplo: /cerrar ETH 2690.5"
@@ -287,7 +288,7 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
         $script:LastCmd[$key] = Get-Date
         switch ($cmd) {
             { $_ -in "/ayuda", "/start", "/help" } {
-                $h = $script:HelpText; if (-not $script:PrivateChats -or $chat -in $script:PrivateChats) { $h = $h.Replace("/ayuda · esta ayuda", "/resultados · informe diario sencillo (señales + tus operaciones manuales); también llega solo cada día a las 22:00 (hora de España)`n/semanal · informe semanal profundo con análisis de los fallos; también llega solo los domingos a las 22:00`n/operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · registra una operación tuya en el seguimiento`n/mercado · prueba en seco del escáner de acciones/ETFs (no envía nada al grupo)`n/cerrar PAR PRECIO · registra el cierre manual de una operación tuya`n(estos 4 comandos solo funcionan en este chat privado)`n/ayuda · esta ayuda") }
+                $h = $script:HelpText; if (-not $script:PrivateChats -or $chat -in $script:PrivateChats) { $h = $h.Replace("/ayuda · esta ayuda", "/resultados · informe diario sencillo (señales + tus operaciones manuales); también llega solo cada día a las 22:00 (hora de España)`n/semanal · informe semanal profundo con análisis de los fallos; también llega solo los domingos a las 22:00`n/operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO · registra una operación tuya en el seguimiento y la pasa por tu control de riesgo (margen, coste del SL, lectura del mercado, reentradas)`n/mercado · prueba en seco del escáner de acciones/ETFs (no envía nada al grupo)`n/cerrar PAR PRECIO · registra el cierre manual de una operación tuya`n(estos 4 comandos solo funcionan en este chat privado)`n/ayuda · esta ayuda") }
                 Send-Tg $token $chat $h $m.message_id
             }
             { $_ -in "/resultados", "/semanal", "/operacion", "/cerrar", "/mercado" } {
@@ -345,6 +346,7 @@ if (Test-Path (Join-Path $PSScriptRoot "analisis-tecnico.ps1")) { . (Join-Path $
 if (Test-Path (Join-Path $PSScriptRoot "momento.ps1")) { . (Join-Path $PSScriptRoot "momento.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-compacta.ps1")) { . (Join-Path $PSScriptRoot "senal-compacta.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "control-riesgo.ps1")) { . (Join-Path $PSScriptRoot "control-riesgo.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "busqueda.ps1")) { . (Join-Path $PSScriptRoot "busqueda.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "noticias.ps1")) { . (Join-Path $PSScriptRoot "noticias.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "fundamentales.ps1")) { . (Join-Path $PSScriptRoot "fundamentales.ps1") }
