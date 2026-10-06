@@ -33,9 +33,9 @@ function Build-OrderCard($side, $plan) {
     if (-not $plan) { return $null }
     $sg = if ($side -eq 'L') { 1 } else { -1 }; $en = [double]$plan.entry; $sl = [double]$plan.sl; $mg = 200.0
     $slPct = [Math]::Abs($sl - $en) / $en * 100; if ($slPct -le 0) { return $null }
-    $lev = [Math]::Min(20, [Math]::Floor(35.0 / $slPct))
+    $lev = [Math]::Min(20, [Math]::Floor((Get-SlMaxPct) / $slPct))
     $L = @("📋 FICHA DE ORDEN · posición de 200 USDT de margen")
-    if ($lev -lt 1) { $L += ("• El SL está a {0:N1}% del precio: con x1 ya perderías más del 35% del margen. Reduce el margen o descarta esta entrada." -f $slPct); return ($L -join "`n") }
+    if ($lev -lt 1) { $L += ("• El SL está a {0:N1}% del precio: con x1 ya perderías más del $((Get-SlMaxPct).ToString('N0'))% del margen. Reduce el margen o descarta esta entrada." -f $slPct); return ($L -join "`n") }
     $nom = $mg * $lev; $qty = $nom / $en; $loss = $nom * $slPct / 100; $liq = 100.0 / $lev
     $roi = { param($p) $sg * ($p - $en) / $en * 100 * $lev }
     $t1 = $en + $sg * [Math]::Abs($en - $sl) * 1; $t2 = $en + $sg * [Math]::Abs($en - $sl) * 2; $t3 = $en + $sg * [Math]::Abs($en - $sl) * 3
@@ -54,16 +54,16 @@ function Build-OrderCard($side, $plan) {
     $L += "El bot no abre ni cierra operaciones: pon estas órdenes tú en Bitunix (botón TP/SL de la posición)."
     return ($L -join "`n")
 }
-function Get-OrderLevels($side, $plan, $kind) {      # entrada, apalancamiento orientativo, SL y tres objetivos (el final no pasa del siguiente obstáculo)
+function Get-OrderLevels($side, $plan, $kind, $score = $null, $tmg = 0) {      # entrada, apalancamiento orientativo, SL y tres objetivos (el final no pasa del siguiente obstáculo)
     if (-not $plan) { return $null }
     $sg = if ($side -eq 'L') { 1 } else { -1 }; $en = [double]$plan.entry; $sl = [double]$plan.sl; $R = [Math]::Abs($en - $sl); if ($R -le 0) { return $null }
     $slPct = $R / $en * 100; $t1 = $en + $sg * $R; $t2 = $en + $sg * 2 * $R; $t3 = $en + $sg * 3 * $R
     if ($plan.ob) { $ob = [double]$plan.ob
         if ($sg * ($ob - $en) -gt 1.05 * $R) { $fin = $ob - $sg * 0.1 * $R; if ($sg * ($t3 - $fin) -gt 0) { $t3 = $fin }; if ($sg * ($t2 - $t3) -ge 0) { $t2 = ($t1 + $t3) / 2 } } }
-    return @{ sg = $sg; entry = $en; sl = $sl; t1 = $t1; t2 = $t2; t3 = $t3; slPct = $slPct; lev = (Get-SuggestedLev $slPct $kind) }
+    return @{ sg = $sg; entry = $en; sl = $sl; t1 = $t1; t2 = $t2; t3 = $t3; slPct = $slPct; lev = (Get-SuggestedLev $slPct $kind $score $tmg) }
 }
 function Build-MomAlert($kind, $sym, $side, $score, $plan = $null, [switch]$Priv) {
-    $lv = Get-OrderLevels $side $plan $kind; if (-not $lv) { return $null }
+    $lv = Get-OrderLevels $side $plan $kind $score; if (-not $lv) { return $null }
     return (Format-CompactSignal $lv.sg ($(if ($kind -eq 'cripto') { "$sym/USDT" } else { "$sym" })) $score $lv.entry ([bool]$plan.pullback) $lv.lev $lv.sl $lv.t1 $lv.t2 $lv.t3 $kind $(if ($kind -eq 'cripto') { '4h' } else { '1d' }))
 }
 function Register-MomSignal($kind, $sym, $lv, $plan) {      # cada aviso emitido queda registrado: se vigila (cambios de lectura, nuevos SL/TP) igual que las rupturas
@@ -100,7 +100,7 @@ function Invoke-MomItems($kind, $items, [switch]$Dry) {
                     $msg = Build-MomAlert $kind $sym $side $score $plan; if (-not $msg) { continue }
                     if ($kind -eq 'cripto') { Send-ToSignalChats $msg }
                     if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $msg $null }
-                    try { Register-MomSignal $kind $sym (Get-OrderLevels $side $plan $kind) $plan } catch {}
+                    try { Register-MomSignal $kind $sym (Get-OrderLevels $side $plan $kind $score) $plan } catch {}
                     $act += $key; $sent++; $script:MomSent++
                 } elseif ($score -lt ($thr - 3) -and $key -in $act) {
                     # un aviso recien emitido no se invalida con el ruido del precio en vivo: hace falta que haya cerrado al menos una vela nueva (4h cripto, 1d acciones)

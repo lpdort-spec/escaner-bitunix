@@ -87,7 +87,7 @@ function Handle-SenalTomada($ra, $chat = $null, $who = "") {
         @($me.fx | Where-Object { $_ -like '⚠️*' } | Select-Object -First 3) | ForEach-Object { $L += "   $_" }
         @($me.fx | Where-Object { $_ -like '✅*' } | Select-Object -First 2) | ForEach-Object { $L += "   $_" }
     }
-    if ($isPriv -and -not $isStock) {      # reglas personales de Luis (margen, SL <= 35% del margen, reentradas...)
+    if ($isPriv -and -not $isStock) {      # reglas personales de Luis (margen, SL <= 20% del margen, reentradas...)
         $mgEst = if ($sig.margin) { [double]$sig.margin } else { 200 }
         try { $L += ""; $L += (Get-RiskCheck $s0 $sg $entry $sl $t3 $mgEst $lev) } catch {}
     } else { $L += ("   Con x{0:N0}, tocar el SL costaría ≈ {1:N0}% del margen." -f $lev, ($slPct * $lev)) }

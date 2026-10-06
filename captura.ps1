@@ -136,7 +136,7 @@ function Format-CapturaAnalysis($p, [bool]$register, [string]$who) {
     if (-not $sl) { $verdict = "PROTEGER YA"; $why += "no tiene stop: una posición sin SL puede liquidarse. Pon uno ahora (sugerido {0})" -f (TaFp ($en - $sg * [Math]::Max(1.2 * $atr, 0.02 * $en))) }
     else {
         $R = [Math]::Abs($en - $sl); $slPct = $R / $en * 100; $costMg = if ($lev) { $slPct * $lev } else { $null }; $dSl = $sg * ($px - $sl)
-        if ($costMg) { $L += ("🛡️ Si salta el SL pierdes ≈ {0:N0} USDT ({1:N0}% del margen){2}" -f ($mg * $costMg / 100), $costMg, $(if ($costMg -gt 35) { " ⚠️ por encima de tu límite del 35%" } else { " ✔ dentro de tu regla del 35%" })) }
+        if ($costMg) { $L += ("🛡️ Si salta el SL pierdes ≈ {0:N0} USDT ({1:N0}% del margen){2}" -f ($mg * $costMg / 100), $costMg, $(if ($costMg -gt (Get-SlMaxPct)) { " ⚠️ por encima de tu límite del {0:N0}%" -f (Get-SlMaxPct) } else { " ✔ dentro de tu regla del {0:N0}%" -f (Get-SlMaxPct) })) }
         if ($p.liq) { $dl = [Math]::Abs($px - $p.liq) / $px * 100; $L += ("   Liquidación a {0:N1}% del precio y SL a {2:N1}%: {1}" -f $dl, $(if ([Math]::Abs($sl - $px) / $px * 100 -lt $dl * 0.8) { "queda más lejos ✔" } else { "⚠️ demasiado cerca" }), ([Math]::Abs($sl - $px) / $px * 100)) }
         if ($atr -gt 0 -and $dSl -lt 0.8 * $atr) { $L += ("⚠️ El SL queda a solo {0:N1} ATR del precio: es fácil que el ruido normal lo toque." -f ($dSl / $atr)) }
         if ($sg * ($px - $en) / $R -ge 1.0) { $verdict = "PROTEGER"; $why += "ya vas a +{0:N1}R: cierra un tercio y mueve el SL a tu entrada ({1})" -f ($sg * ($px - $en) / $R), (TaFp $en) }

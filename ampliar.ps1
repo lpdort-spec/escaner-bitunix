@@ -1,6 +1,6 @@
 ﻿# /ampliar PAR [MARGEN_TOTAL=200] [PRECIO]  (solo chat privado de Luis): ¿puedo aumentar la posición abierta hasta X USDT de margen y bajar el precio medio de entrada?
 # Calcula con tu posición registrada (/operacion, captura o /señal tomada) el precio medio nuevo, el SL y la pérdida resultante sobre el margen TOTAL, la liquidación y el beneficio con el TP,
-# para el precio actual y dos órdenes limit más bajas (largos) / más altas (cortos); y da un veredicto con reglas fijas: lectura del activo + timing 1h + tu límite del 35% del margen. Siempre AISLADO.
+# para el precio actual y dos órdenes limit más bajas (largos) / más altas (cortos); y da un veredicto con reglas fijas: lectura del activo + timing 1h + tu límite del 20% del margen (Get-SlMaxPct). Siempre AISLADO.
 function Get-OpenPosition($sym) {
     $sigs = @(Read-Signals | Where-Object { $_.status -eq 'open' -and $_.sym -eq "${sym}USDT" -and ($_.strat -eq 'tomada' -or $_.manual -eq $true) } | Sort-Object { [long]$_.time } -Descending)
     if (-not $sigs.Count) { return $null }
@@ -28,8 +28,8 @@ function Get-AmpliarReport($sym, [double]$target, [double]$limitPx) {
     $L += ("   Añadir {0:N0} USDT de margen para llegar a {1:N0} (misma palanca y mismo SL)" -f $add, $target); $L += ""
     $base = Get-AmpliarScenario $pos 0.0001 $px; $L += ("   Hoy: pierdes ≈ {0:N0} USDT ({1:N0}% del margen) si salta el SL y ganas ≈ {2:N0} USDT con el TP" -f $base.lossSl, ($base.lossSl / $pos.margin * 100), $base.gainTp); $L += ""
     $ok35 = @()
-    foreach ($c in $cands) { $sc = Get-AmpliarScenario $pos $add ([double]$c[1]); $ok = $sc.lossPct -le 35
-        $L += ("• {0}: precio medio nuevo {1} (antes {2}) · si salta el SL pierdes ≈ {3:N0} USDT ({4:N0}% del margen total){5} · con el TP ganas ≈ {6:N0} USDT (R:B {7:N1}) · liquidación ≈ {8}" -f $c[0], (TaFp $sc.avg), (TaFp $pos.entry), $sc.lossSl, $sc.lossPct, $(if ($ok) { " ✔" } else { " ⚠️ pasa de tu 35%" }), $sc.gainTp, $sc.rr, (TaFp $sc.liq)); if ($ok) { $ok35 += $c } }
+    foreach ($c in $cands) { $sc = Get-AmpliarScenario $pos $add ([double]$c[1]); $ok = $sc.lossPct -le (Get-SlMaxPct)
+        $L += ("• {0}: precio medio nuevo {1} (antes {2}) · si salta el SL pierdes ≈ {3:N0} USDT ({4:N0}% del margen total){5} · con el TP ganas ≈ {6:N0} USDT (R:B {7:N1}) · liquidación ≈ {8}" -f $c[0], (TaFp $sc.avg), (TaFp $pos.entry), $sc.lossSl, $sc.lossPct, $(if ($ok) { " ✔" } else { " ⚠️ pasa de tu $((Get-SlMaxPct).ToString('N0'))%" }), $sc.gainTp, $sc.rr, (TaFp $sc.liq)); if ($ok) { $ok35 += $c } }
     # lectura del activo + timing
     $own = $null; $opp = $null; $neg = @(); $tmg = 0
     try { $s = @{ src = 'bitunix'; sym = $sym; name = "$sym/USDT"; currency = 'USDT'; exch = ''; price = $px; extra = @{ funding = $null } }; $r = Get-MomScores $s
@@ -39,8 +39,8 @@ function Get-AmpliarReport($sym, [double]$target, [double]$limitPx) {
     $verd = ""; $why = @()
     if ($sg * ($px - $pos.entry) -lt 0) {      # promediando a la baja (largo) / al alza (corto)
         if ($null -eq $own -or $own -lt 7 -or $tmg -le -3) { $verd = "⛔ NO AÑADIRÍA"; $why += "estarías promediando una posición que va en contra con una lectura que no es claramente favorable (puntuación $own); es el patrón que más te ha costado (MOVR, API3)" }
-        elseif (-not $ok35.Count) { $verd = "⛔ NO AÑADIRÍA"; $why += "con el mismo SL el riesgo total superaría tu 35% del margen" }
-        else { $verd = "🟡 SOLO CON LIMIT, NO A MERCADO"; $why += "la lectura sigue a favor (puntuación $own), pero solo añade con una orden limit más baja de las de arriba que cumplen tu 35%, sin mover el SL y sin volver a añadir después" }
+        elseif (-not $ok35.Count) { $verd = "⛔ NO AÑADIRÍA"; $why += "con el mismo SL el riesgo total superaría tu $((Get-SlMaxPct).ToString('N0'))% del margen" }
+        else { $verd = "🟡 SOLO CON LIMIT, NO A MERCADO"; $why += "la lectura sigue a favor (puntuación $own), pero solo añade con una orden limit más baja de las de arriba que cumplen tu $((Get-SlMaxPct).ToString('N0'))%, sin mover el SL y sin volver a añadir después" }
     } else {
         if ($null -ne $own -and $own -ge 6 -and $tmg -gt -3 -and $ok35.Count) { $verd = "✅ SE PUEDE AÑADIR (en beneficio)"; $why += "la lectura sigue a favor; sube el SL a la entrada tras añadir para que el conjunto no pueda perder más de lo previsto" }
         else { $verd = "🟡 MEJOR ESPERAR"; $why += "en beneficio añadir tiene sentido solo con lectura clara a favor y sin estiramiento (ahora: puntuación $own, timing $tmg)" }

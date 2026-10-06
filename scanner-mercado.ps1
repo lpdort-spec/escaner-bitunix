@@ -118,7 +118,7 @@ function Build-MktMessage($b, $s) {      # señal COMPACTA: puntuación, entrada
     $sg = $s.side; $slPct = [Math]::Abs($s.sl / $s.entry - 1) * 100
     $kind = if ($b.kind -eq "ETF") { "ETF" } else { "accion" }
     $score = Get-SignalScore $b.tkr $kind $sg ([double]$s.px) $b.exch
-    return (Format-CompactSignal $sg ("{0} · 1d" -f $b.tkr) $score $s.entry $true (Get-SuggestedLev $slPct $kind) $s.sl $s.tp1 $s.tp2 $s.tp3 $kind '1d')
+    return (Format-CompactSignal $sg ("{0} · 1d" -f $b.tkr) $score $s.entry $true (Get-SuggestedLev $slPct $kind $score) $s.sl $s.tp1 $s.tp2 $s.tp3 $kind '1d')
 }
 # ---------- barrido diario del universo ----------
 function Scan-Market([switch]$Dry) {

@@ -206,7 +206,7 @@ function Build-RiskReport($ra) {
     $L += ("Margen {0:N2} USDT · posición {1:N2} USDT · cantidad {2:N4}" -f $mg, $notional, $qty)
     $L += ""
     if ($pSl -lt 0) {
-        $okSl = if ($risk / $mg * 100 -le 35) { "✅ dentro del 35% del margen (referencia prudente)" } else { "⚠️ supera el 35% del margen (referencia prudente)" }
+        $mxSl = Get-SlMaxPct; $okSl = if ($risk / $mg * 100 -le $mxSl) { "✅ dentro del {0:N0}% del margen (tu regla)" -f $mxSl } else { "⚠️ supera el {0:N0}% del margen (tu regla)" -f $mxSl }
         $L += ("🛑 Si salta el SL: -{0:N2} USDT = {1:N1}% del margen ({2:N2}% de movimiento). {3}" -f $risk, ($risk / $mg * 100), ([Math]::Abs($sl - $en) / $en * 100), $okSl)
     } else { $L += ("🛑 El SL está en zona de beneficio: si salta, ganas +{0:N2} USDT (+{1:N1}% del margen). Riesgo inicial nulo." -f $pSl, ($pSl / $mg * 100)) }
     $L += ("🎯 Si llega al TP: +{0:N2} USDT = +{1:N1}% del margen ({2:N2}% de movimiento)" -f $pTp, ($pTp / $mg * 100), ([Math]::Abs($tp - $en) / $en * 100))

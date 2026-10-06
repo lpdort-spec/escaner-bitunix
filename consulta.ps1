@@ -1,9 +1,9 @@
 ﻿# /consulta SIMBOLO [largo|corto]  (solo chat privado de Luis): ¿abro una operación en esta cripto de Bitunix? Veredicto claro (abrir / esperar retroceso / no abrir), plan con SL y parciales,
-# apalancamiento para margen de 200 USDT en AISLADO (SL <= 35% del margen) y la lectura conjunta de 1d/4h + timing de 1h (Bollinger, RSI, volumen, velas, Fibonacci). Reglas fijas y visibles.
+# apalancamiento para margen de 200 USDT en AISLADO (SL <= 20% del margen, Get-SlMaxPct) y la lectura conjunta de 1d/4h + timing de 1h (Bollinger, RSI, volumen, velas, Fibonacci). Reglas fijas y visibles.
 function Get-ConsultaSide($sc, [string]$sideKey, [string]$px) {
     $dir = if ($sideKey -eq 'L') { "LARGO" } else { "CORTO" }; $icon = if ($sideKey -eq 'L') { "📈" } else { "📉" }
     $score = [int]$sc.score; $tmg = if ($null -ne $sc.timing) { [int]$sc.timing } else { 0 }
-    $lv = Get-OrderLevels $sideKey $sc.plan 'cripto'
+    $lv = Get-OrderLevels $sideKey $sc.plan 'cripto' $score $tmg
     $rec = if ($score -ge 7 -and $tmg -gt -3) { "✅ SE PUEDE ABRIR (con el plan de abajo)" } elseif ($score -ge 7) { "🟡 ESPERA: la lectura es buena pero el movimiento está estirado en 1h; entra en un retroceso" } elseif ($score -ge 4) { "🟡 ESPERA UN RETROCESO: aceptable pero sin ventaja clara ahora" } else { "⛔ NO LA ABRIRÍA AHORA" }
     $o = @(); $o += ("{0} {1}: puntuación {2}{3} → {4}" -f $icon, $dir, $score, $(if ($tmg -ne 0) { " (timing 1h {0:+0;-0})" -f $tmg } else { "" }), $rec)
     $neg = @($sc.fx | Where-Object { $_ -like '⚠️*' } | Select-Object -First 4); $pos = @($sc.fx | Where-Object { $_ -like '✅*' } | Select-Object -First 4)

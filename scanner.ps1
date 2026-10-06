@@ -17,7 +17,7 @@ param(
     [string]$TelegramToken = "",
     [string]$TelegramChatId = "",
     [double]$MaxMargin = 200,       # margen máximo por operación (USDT)
-    [double]$MaxLossPct = 35,       # el SL nunca debe perder más de este % del margen
+    [double]$MaxLossPct = 20,       # el SL nunca debe perder más de este % del margen (regla de Luis desde 2026-10-06; el apalancamiento también se limita por liquidez y volatilidad del activo)
     [string]$StateFile = "",
     [int]$MaxMinutes = 0,           # 0 = sin límite; en la nube se limita a ~5h45 y el siguiente turno continúa
     [switch]$NoChart,

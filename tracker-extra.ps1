@@ -24,7 +24,7 @@ function New-ManualRecord($sym, [int]$sg, [double]$en, [double]$sl, [double]$tp,
     $qty = if ($qtyOverride) { [double]$qtyOverride } else { $mg * $lv / $en }
     $slRef = if ($sl0) { [double]$sl0 } else { $sl }                                  # SL inicial (si el SL actual ya se movió a beneficio)
     $loss = $sg * ($slRef - $en) -lt 0
-    $riskAbs = if ($loss) { [Math]::Abs($en - $slRef) } else { 0.35 * $mg / $qty }     # sin SL inicial en pérdida: R de referencia = 35% del margen (regla del usuario)
+    $riskAbs = if ($loss) { [Math]::Abs($en - $slRef) } else { (Get-SlMaxPct) / 100 * $mg / $qty }     # sin SL inicial en pérdida: R de referencia = % máximo del margen (regla del usuario, Get-SlMaxPct)
     $lastLabel = [long]0
     try { $k = @((Invoke-RestMethod "$($script:TrkBase)/kline?symbol=${sym}USDT&interval=1h&limit=5" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $lastLabel = [long]$k[$k.Count - 2].time } catch {}
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -153,7 +153,7 @@ function Get-MarketSection {
 function Get-DisciplineLines {
     $cl = @(Read-Signals | Where-Object { $_.manual -ne $true -and $_.strat -ne 'barrido-obs' -and $_.strat -ne 'ruptura-mercado' -and $_.strat -ne 'seg-grupo' -and $_.strat -ne 'seg-priv' -and $_.strat -ne 'momento-obs' -and $_.strat -ne 'aviso-momento' -and $_.strat -ne 'tomada' -and $_.strat -ne 'arranque-obs' -and $_.status -eq 'closed' -and $_.closedAt } | Sort-Object { [long]$_.closedAt })
     $L = @("", "🛡️ DISCIPLINA Y RIESGO")
-    if ($cl.Count -eq 0) { $L += "• Aún no hay señales cerradas. Recuerda el plan: cada operación debe acabar en pequeño beneficio, gran beneficio, pequeña pérdida o breakeven; nunca en una gran pérdida (SL siempre puesto en Bitunix y ≤35% del margen)."; return $L }
+    if ($cl.Count -eq 0) { $L += "• Aún no hay señales cerradas. Recuerda el plan: cada operación debe acabar en pequeño beneficio, gran beneficio, pequeña pérdida o breakeven; nunca en una gran pérdida (SL siempre puesto en Bitunix y ≤20% del margen)."; return $L }
     $streak = 0; $dirWin = $null
     for ($i = $cl.Count - 1; $i -ge 0; $i--) { $w = ([double]$cl[$i].net -gt 0); if ($null -eq $dirWin) { $dirWin = $w }; if ($w -eq $dirWin) { $streak++ } else { break } }
     $now = Get-MadridNow; $monday = $now.Date.AddDays(-(([int]$now.DayOfWeek + 6) % 7)); $mondayUtc = [DateTimeOffset]::new($monday, [TimeZoneInfo]::FindSystemTimeZoneById("Romance Standard Time").GetUtcOffset($monday)).ToUnixTimeSeconds()
@@ -182,3 +182,6 @@ function Get-DailyReport {
     $L += ""; $L += "Resultados descontando comisiones. Comando para pedirlo cuando quieras: /resultados"
     return ($L -join "`n")
 }
+
+# Pérdida máxima aceptada al saltar el SL, en % del MARGEN (regla de Luis desde 2026-10-06: 20%; antes 35%). Ajustable en chats.json: "slMaxMargen".
+function Get-SlMaxPct { try { $c = Get-Content (Join-Path $PSScriptRoot "chats.json") -Raw -Encoding UTF8 | ConvertFrom-Json; if ($null -ne $c.slMaxMargen -and [double]$c.slMaxMargen -gt 0) { return [double]$c.slMaxMargen } } catch {}; return 20.0 }

@@ -1,5 +1,5 @@
 ﻿# Control de riesgo al registrar una operación propia con /operacion (solo chat privado de Luis). Avisa, NO bloquea: la decisión es siempre tuya.
-# Reglas de Luis: margen <= 200 USDT, SL que cueste como máximo el 35% del margen, comisiones controladas. Lecciones del diario de operaciones (01-06/10): cortos contra subidas verticales con RSI extremo,
+# Reglas de Luis: margen <= 200 USDT, SL que cueste como máximo el 20% del margen (Get-SlMaxPct), comisiones controladas. Lecciones del diario de operaciones (01-06/10): cortos contra subidas verticales con RSI extremo,
 # reentradas en menos de 15 minutos tras una pérdida y apalancamientos muy altos donde las comisiones se comen el margen.
 function Get-RiskCheck($symR, [int]$sg, [double]$en, [double]$sl, [double]$tp, [double]$mg, [double]$lv) {
     $L = @(); $warn = 0
@@ -7,8 +7,9 @@ function Get-RiskCheck($symR, [int]$sg, [double]$en, [double]$sl, [double]$tp, [
     # 1) margen
     if ($mg -gt 200) { $L += ("⚠️ Margen {0:N0} USDT: supera tu límite de 200." -f $mg); $warn++ }
     # 2) coste del SL y liquidación
-    if ($loss -gt 35) { $L += ("⚠️ El SL está a {0:N2}% del precio: con x{1:N0} pierdes {2:N0}% del margen (≈ {3:N0} USDT). Tu regla es 35% como máximo: baja el apalancamiento a x{4:N0} o acerca el SL." -f $slPct, $lv, $loss, $lossUsd, [Math]::Max(1, [Math]::Floor(35 / $slPct))); $warn++ }
-    else { $L += ("✔ El SL cuesta {0:N0}% del margen (≈ {1:N0} USDT), dentro de tu regla del 35%." -f $loss, $lossUsd) }
+    $mx = Get-SlMaxPct
+    if ($loss -gt $mx) { $L += ("⚠️ El SL está a {0:N2}% del precio: con x{1:N0} pierdes {2:N0}% del margen (≈ {3:N0} USDT). Tu regla es {5:N0}% como máximo: baja el apalancamiento a x{4:N0} o acerca el SL." -f $slPct, $lv, $loss, $lossUsd, [Math]::Max(1, [Math]::Floor($mx / $slPct)), $mx); $warn++ }
+    else { $L += ("✔ El SL cuesta {0:N0}% del margen (≈ {1:N0} USDT), dentro de tu regla del {2:N0}%." -f $loss, $lossUsd, $mx) }
     $liq = 100.0 / $lv - 0.3; if ($slPct -ge 0.8 * $liq) { $L += ("⚠️ El SL queda muy cerca de la liquidación (≈ a {0:N1}% del precio): un pico puede liquidarte antes de que actúe el stop." -f $liq); $warn++ }
     # 3) comisiones con apalancamiento alto
     if ($lv -ge 30) { $L += ("⚠️ Con x{0:N0} las comisiones de ida y vuelta (~0,15% del nominal) cuestan ≈ {1:N1}% del margen: si el precio apenas se mueve, pierdes igualmente." -f $lv, (0.15 * $lv)); $warn++ }
