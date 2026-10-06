@@ -128,7 +128,7 @@ function Get-NewsSection($sym, $name, [bool]$isCrypto, [switch]$Short) {
         $fo = Get-NextFomc; $ev = @(Get-MacroEvents 8)
         if ($fo) { $L += "🗓️ Próxima $($fo.text)" }
         foreach ($e in ($ev | Select-Object -First 4)) { $loc = [TimeZoneInfo]::ConvertTime($e.when, $tz); $dh = ($e.when - [DateTimeOffset]::UtcNow).TotalHours
-            $L += ("🗓️ {0:dd/MM HH:mm} (hora de España) · {1} (EE. UU., impacto alto){2}" -f $loc.DateTime, $e.title, $(if ($dh -gt 0 -and $dh -lt 24) { " ⚠️ en menos de 24 h: suele dar volatilidad" } else { "" })) }
+            $L += ("🗓️ {0:dd/MM HH:mm} (hora de España) · {1} (EE. UU., impacto alto){2}" -f $loc.DateTime, (Format-MacroTitle $e.title), $(if ($dh -gt 0 -and $dh -lt 24) { " ⚠️ en menos de 24 h: suele dar volatilidad" } else { "" })) }
         if (-not $fo -and -not $ev.Count) { $L += "🗓️ No he podido leer el calendario macro ahora." }
     } catch { $L += "🗓️ No he podido leer el calendario macro ahora." }
     if ($Short -and -not $isCrypto) { try { $ne = Get-NextEarnings $sym; if ($ne) { $L += ("🗓️ Resultados trimestrales de {0}: {1:dd/MM/yyyy} ({2}){3}" -f $sym, $ne.date, $(if ($ne.days -ge 0) { "en $($ne.days) días" } else { "ya publicados" }), $(if ($ne.days -ge 0 -and $ne.days -le 7) { " ⚠️ cercanos: riesgo de salto de precio" } else { "" })) } } catch {} }
@@ -137,15 +137,15 @@ function Get-NewsSection($sym, $name, [bool]$isCrypto, [switch]$Short) {
         $as = @(Get-AssetNews $sym $name $isCrypto 72)
         $fl = @($as | ForEach-Object { [pscustomobject]@{ i = $_; f = @(Get-NewsFlags $_.title) } })
         $top = @($fl | Sort-Object { $_.f.Count }, { $_.i.when } -Descending | Select-Object -First $max); $top = @($top | Sort-Object { $_.i.when } -Descending)
-        if ($top.Count) { $L += "Titulares recientes de $sym (72 h):"; foreach ($t in $top) { $L += ("   • {0}{1} — {2}, {3}" -f $(if ($t.f.Count) { "[" + ($t.f -join ' · ') + "] " } else { "" }), $t.i.title, $t.i.src, (Get-AgeText $t.i.when)) } }
+        if ($top.Count) { $L += "Titulares recientes de $sym (72 h):"; foreach ($t in $top) { $L += ("   • {0}{1} — {2}, {3}" -f $(if ($t.f.Count) { "[" + ($t.f -join ' · ') + "] " } else { "" }), (Format-NwTitle $t.i.title), $t.i.src, (Get-AgeText $t.i.when)) } }
         else { $L += "Sin titulares recientes de $sym en las fuentes consultadas (puede ser que no haya noticias o que las fuentes no las recojan)." }
     } catch { $L += "No he podido leer titulares del activo ahora." }
     try {
         $kinds = if ($isCrypto) { 'cripto', 'legal', 'macro' } else { 'macro', 'legal' }
         $gen = @(Get-NewsPool | Where-Object { $_.kind -in $kinds -and $_.when -gt [DateTimeOffset]::UtcNow.AddHours(-36) } | ForEach-Object { [pscustomobject]@{ i = $_; f = @(Get-NewsFlags $_.title) } } | Where-Object { $_.f -match 'legal|regulación|macro' } | Select-Object -First 3)
-        if ($gen.Count) { $L += "Contexto de mercado (regulación, leyes, juicios, Reserva Federal; 36 h):"; foreach ($t in $gen) { $L += ("   • [{0}] {1} — {2}, {3}" -f ($t.f -join ' · '), $t.i.title, $t.i.src, (Get-AgeText $t.i.when)) } }
+        if ($gen.Count) { $L += "Contexto de mercado (regulación, leyes, juicios, Reserva Federal; 36 h):"; foreach ($t in $gen) { $L += ("   • [{0}] {1} — {2}, {3}" -f ($t.f -join ' · '), (Format-NwTitle $t.i.title), $t.i.src, (Get-AgeText $t.i.when)) } }
     } catch {}
-    $L += "   (Titulares en inglés clasificados por palabras clave: el bot NO sabe si una noticia es buena o mala para el precio. Confírmalas en la fuente. Fuentes: Yahoo Finance, Google News, CNBC, MarketWatch, medios cripto, Fed, SEC y calendario económico.)"
+    $L += "   (Titulares traducidos al castellano con verificación de cifras y siglas, con el original entre paréntesis; clasificados por palabras clave: el bot NO sabe si una noticia es buena o mala para el precio. Confírmalas en la fuente. Fuentes: Yahoo Finance, Google News, CNBC, MarketWatch, medios cripto, Fed, SEC y calendario económico.)"
     return ($L -join "`n")
 }
 
@@ -163,7 +163,7 @@ function Send-MacroRemindersIfDue {          # aviso previo (< 26 h) de eventos 
         $dh = ($e.when - [DateTimeOffset]::UtcNow).TotalHours; if ($dh -lt 0 -or $dh -gt 26) { continue }
         $key = ($e.when.ToString("yyyyMMddHH") + "-" + (($e.title -replace '[^A-Za-z0-9]', '').ToLower())); if ($key -in $sent) { continue }
         $loc = [TimeZoneInfo]::ConvertTime($e.when, $tz)
-        $m = ("📅 AVISO MACRO · en ≈{0:N0} h ({1:dd/MM HH:mm}, hora de España): {2} (EE. UU., impacto alto)`nEstos eventos suelen mover bolsa y cripto con fuerza en pocos minutos. Si tienes operaciones abiertas, revisa el SL y evita abrir justo antes del dato.`nNo es una señal de operación." -f $dh, $loc.DateTime, $e.title)
+        $m = ("📅 AVISO MACRO · en ≈{0:N0} h ({1:dd/MM HH:mm}, hora de España): {2} (EE. UU., impacto alto)`nEstos eventos suelen mover bolsa y cripto con fuerza en pocos minutos. Si tienes operaciones abiertas, revisa el SL y evita abrir justo antes del dato.`nNo es una señal de operación." -f $dh, $loc.DateTime, (Format-MacroTitle $e.title))
         Send-NwMsg $true $true $m; $new += $key
     }
     if ($new.Count) { Set-ReportState "macrord" ((@($sent + $new) | Select-Object -Last 40) -join ',') }
@@ -180,7 +180,7 @@ function Check-NewsOnPositions {             # titulares de riesgo (legal, regul
             foreach ($n in @(Get-AssetNews $sym $null (-not $isStock) 12)) {
                 $fl = @(Get-NewsFlags $n.title | Where-Object { $_ -match 'legal|regulación|riesgo' }); if (-not $fl.Count) { continue }
                 $h = [Math]::Abs(($sym + $n.title).GetHashCode()).ToString(); if ($h -in $done -or $h -in $add) { continue }
-                $m = ("📰 NOTICIA A TENER EN CUENTA · {0} {1}`n[{2}] {3}`n{4}, {5}{6}`nEl bot no sabe si es buena o mala para el precio: revísala en la fuente y valora tu SL. Tienes una operación o seguimiento abierto en este activo." -f $sym, $(if ([int]$s.side -eq 1) { "LARGO" } else { "CORTO" }), ($fl -join ' · '), $n.title, $n.src, (Get-AgeText $n.when), $(if ($n.link) { "`n" + $n.link } else { "" }))
+                $m = ("📰 NOTICIA A TENER EN CUENTA · {0} {1}`n[{2}] {3}`n{4}, {5}{6}`nEl bot no sabe si es buena o mala para el precio: revísala en la fuente y valora tu SL. Tienes una operación o seguimiento abierto en este activo." -f $sym, $(if ([int]$s.side -eq 1) { "LARGO" } else { "CORTO" }), ($fl -join ' · '), (Format-NwTitle $n.title -Block), $n.src, (Get-AgeText $n.when), $(if ($n.link) { "`n" + $n.link } else { "" }))
                 Send-NwMsg $toPriv $toGroup $m; $add += $h
             }
         } catch {}
@@ -211,7 +211,7 @@ function Scan-UniverseNews {
         $dk = "$hit|$($fl[0])"; if ($dk -in $seenDK) { continue }      # misma historia en varios portales: un solo aviso por activo y tipo
         $h = [Math]::Abs(($hit + $p.title).GetHashCode()).ToString(); if ($h -in $done -or $h -in $add) { continue }
         $seenDK += $dk
-        $m = ("📰 NOTICIA RELEVANTE · {0}`n[{1}] {2}`n{3}, {4}{5}`nEl bot no sabe si es buena o mala para el precio: revísala en la fuente. Si hay operación abierta en este activo, valora el SL." -f $hit, ($fl -join ' · '), $p.title, $p.src, (Get-AgeText $p.when), $(if ($p.link) { "`n" + $p.link } else { "" }))
+        $m = ("📰 NOTICIA RELEVANTE · {0}`n[{1}] {2}`n{3}, {4}{5}`nEl bot no sabe si es buena o mala para el precio: revísala en la fuente. Si hay operación abierta en este activo, valora el SL." -f $hit, ($fl -join ' · '), (Format-NwTitle $p.title -Block), $p.src, (Get-AgeText $p.when), $(if ($p.link) { "`n" + $p.link } else { "" }))
         Send-NwMsg $false $true $m; $add += $h; $sent++
     }
     if ($add.Count) { Set-ReportState "noticiasu" ((@($done + $add) | Select-Object -Last 150) -join ',') }

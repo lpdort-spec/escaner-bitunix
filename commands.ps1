@@ -390,6 +390,7 @@ if (Test-Path (Join-Path $PSScriptRoot "timing-1h.ps1")) { . (Join-Path $PSScrip
 if ((Test-Path (Join-Path $PSScriptRoot "avisos-momento.ps1")) -and -not (Get-Command Get-OrderLevels -ErrorAction SilentlyContinue)) { . (Join-Path $PSScriptRoot "avisos-momento.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "consulta.ps1")) { . (Join-Path $PSScriptRoot "consulta.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "ampliar.ps1")) { . (Join-Path $PSScriptRoot "ampliar.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "traduccion.ps1")) { . (Join-Path $PSScriptRoot "traduccion.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-compacta.ps1")) { . (Join-Path $PSScriptRoot "senal-compacta.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "control-riesgo.ps1")) { . (Join-Path $PSScriptRoot "control-riesgo.ps1") }
