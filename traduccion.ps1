@@ -30,20 +30,37 @@ function Invoke-MyMemoryTr([string]$t) {
     try { $j = Invoke-RestMethod ("https://api.mymemory.translated.net/get?langpair=en|es&q=" + [uri]::EscapeDataString($t)) -TimeoutSec 15; $x = "$($j.responseData.translatedText)"; if ($x -and $j.responseStatus -eq 200 -and $x -notmatch 'MYMEMORY WARNING') { return @{ text = $x; lang = 'en' } } } catch {}
     return $null
 }
+# Vocabulario financiero (castellano de España): correcciones de errores habituales del traductor automático y casos en los que NO se publica la traducción porque suele ser incorrecta.
+$script:TrFix = @(
+    @('(?i)\bminutas de la (Fed|FOMC|Reserva Federal)\b', 'actas de la $1'), @('(?i)\bminutas del (FOMC|BCE|Banco Central)\b', 'actas del $1'), @('(?i)\brendimientos de los bonos\b', 'rentabilidades de los bonos'), @('(?i)\brendimiento de los bonos\b', 'rentabilidad de los bonos'), @('(?i)\bminutos de la (Fed|FOMC|Reserva Federal)\b', 'actas de la $1'), @('(?i)\bminutos del (FOMC|BCE|Banco Central)\b', 'actas del $1')
+    @('(?i)\brecortes? de tasas?\b', 'recortes de tipos'), @('(?i)\bsubidas? de tasas?\b', 'subida de tipos'), @('(?i)\btasas de interés\b', 'tipos de interés'), @('(?i)\btasa de interés\b', 'tipo de interés')
+    @('(?i)\bla Reserva Federal de EE\. UU\.\b', 'la Reserva Federal'), @('\bacciones de la empresa\b', 'acciones de la compañía')
+)
+$script:TrRisky = @(      # @(regex en el original, regex que NO debe aparecer en la traducción, o $null si basta con que aparezca el español esperado, regex del español esperado)
+    @('(?i)\bbid\b', '(?i)\boferta\b', $null), @('(?i)\bsuit\b', $null, '(?i)demanda|pleito|litigio|juicio'), @('(?i)\bsettles?\b', $null, '(?i)acuerd|llega|pacta|zanja|resuelve|concilia'), @('(?i)\bshort squeeze\b', $null, '(?i)squeeze|cobertura|liquidaci')
+    @('(?i)\beasing\b', $null, '(?i)flexibiliz|relajaci|recorte|bajada|rebaja|est[ií]mulo'), @('(?i)\btightening\b', $null, '(?i)endurec|restricci|subida|ajuste'), @('(?i)\bpare\b', $null, '(?i)reduc|recort|rebaj|moder'), @('(?i)\bslide[sd]?\b', $null, '(?i)ca[ey]|desliz|baj|retroced|descien|pierd|desplom|hund')
+    @('(?i)\bcrackdown\b', $null, '(?i)represi|ofensiva|mano dura|endurec|actuaci|medidas'), @('(?i)\bhalts?\b', $null, '(?i)suspend|paraliz|detien|interrump|frena|detiene|paraliza')
+)
+function Test-RiskyTerms([string]$src, [string]$dst) {      # $true si la traducción es aceptable respecto a los términos que suelen traducirse mal
+    foreach ($r in $script:TrRisky) { if ($src -match $r[0]) { if ($r[1] -and $dst -match $r[1]) { return $false }; if ($r[2] -and $dst -notmatch $r[2]) { return $false } } }
+    return $true
+}
 function Translate-Es([string]$t) {      # devuelve el texto en castellano verificado, o $null si no se pudo traducir con garantías
     $t = "$t".Trim(); if (-not $t) { return $null }; if ($script:TrCache.ContainsKey($t)) { return $script:TrCache[$t] }
     $res = $null
     if (Test-LooksSpanish $t) { $res = $t }
-    else { foreach ($fn in 'Invoke-GoogleTr', 'Invoke-MyMemoryTr') { $r = & $fn $t; if ($r -and $r.text) { if ($r.lang -eq 'es') { $res = $t; break }; if (Test-TranslationFaithful $t $r.text) { $res = $r.text.Trim(); break } } } }
+    else { foreach ($fn in 'Invoke-GoogleTr', 'Invoke-MyMemoryTr') { $r = & $fn $t; if ($r -and $r.text) { if ($r.lang -eq 'es') { $res = $t; break }
+        $x = $r.text.Trim(); foreach ($f in $script:TrFix) { $x = [regex]::Replace($x, $f[0], $f[1]) }
+        if ((Test-TranslationFaithful $t $x) -and (Test-RiskyTerms $t $x)) { $res = $x; break } } } }
     $script:TrCache[$t] = $res; return $res
 }
 function Format-NwTitle([string]$t, [switch]$Block) {      # titular para publicar: traducción verificada + original; si no se puede garantizar, el original marcado como "en inglés"
     $es = Translate-Es $t
     if ($null -eq $es) { return ("{0} (en inglés: no he podido traducirlo con garantías)" -f $t) }
     if ($es -eq $t) { return $t }
-    if ($Block) { return ("{0}`n(original: {1})" -f $es, $t) } else { return ("{0} (orig.: {1})" -f $es, $t) }
+    if ($Block) { return ("{0}`n(traducción automática; original: {1})" -f $es, $t) } else { return ("{0} (traducción automática; orig.: {1})" -f $es, $t) }
 }
 function Format-MacroTitle([string]$t) {      # eventos macro de EE. UU.: diccionario fijo; lo que no esté, traducción verificada o el original
     $k = "$t".Trim(); foreach ($e in $script:MacroEs.GetEnumerator()) { if ($k -ieq $e.Key) { return ("{0} ({1})" -f $e.Value, $k) } }
-    $es = Translate-Es $k; if ($es -and $es -ne $k) { return ("{0} (orig.: {1})" -f $es, $k) }; return $k
+    $es = Translate-Es $k; if ($es -and $es -ne $k) { return ("{0} (traducción automática; orig.: {1})" -f $es, $k) }; return $k
 }

@@ -145,7 +145,7 @@ function Get-NewsSection($sym, $name, [bool]$isCrypto, [switch]$Short) {
         $gen = @(Get-NewsPool | Where-Object { $_.kind -in $kinds -and $_.when -gt [DateTimeOffset]::UtcNow.AddHours(-36) } | ForEach-Object { [pscustomobject]@{ i = $_; f = @(Get-NewsFlags $_.title) } } | Where-Object { $_.f -match 'legal|regulación|macro' } | Select-Object -First 3)
         if ($gen.Count) { $L += "Contexto de mercado (regulación, leyes, juicios, Reserva Federal; 36 h):"; foreach ($t in $gen) { $L += ("   • [{0}] {1} — {2}, {3}" -f ($t.f -join ' · '), (Format-NwTitle $t.i.title), $t.i.src, (Get-AgeText $t.i.when)) } }
     } catch {}
-    $L += "   (Titulares traducidos al castellano con verificación de cifras y siglas, con el original entre paréntesis; clasificados por palabras clave: el bot NO sabe si una noticia es buena o mala para el precio. Confírmalas en la fuente. Fuentes: Yahoo Finance, Google News, CNBC, MarketWatch, medios cripto, Fed, SEC y calendario económico.)"
+    $L += "   (Titulares con traducción AUTOMÁTICA al castellano, verificada solo en cifras, siglas y términos financieros habituales: el texto de referencia es el ORIGINAL que va entre paréntesis; clasificados por palabras clave: el bot NO sabe si una noticia es buena o mala para el precio. Confírmalas en la fuente. Fuentes: Yahoo Finance, Google News, CNBC, MarketWatch, medios cripto, Fed, SEC y calendario económico.)"
     return ($L -join "`n")
 }
 
