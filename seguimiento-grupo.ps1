@@ -105,6 +105,10 @@ function Notify-GroupTracking {
 # Regla fija: operación abierta o pendiente cuyo lado puntúa <= 0 en la lectura de momento Y el lado contrario puntúa >= 6 (la lectura se ha dado la vuelta).
 # Cripto: se revisa tras cada cierre de vela de 4h; acciones/ETFs: una vez al día tras el cierre. Un solo aviso por señal.
 # Destinos: operaciones manuales y rupturas cripto -> chat privado; rupturas 4h de cripto, seguimientos y señales de mercado -> grupo Alertas Mercados.
+# Edad mínima de una señal antes de que el bot pueda avisar de cambios/cerrar/ajustar: una señal swing no debe cambiar de opinión a los pocos minutos.
+# 4h -> 8 h (dos velas completas), 1d -> 24 h, 1h -> 3 h. Las operaciones propias (manual/tomada) no entran aquí: se vigilan en vivo aparte.
+function Get-MinAgeSec($s) { switch ("$($s.tf)") { '1d' { return 86400 } '1h' { return 10800 } default { return 28800 } } }
+function Test-SignalOldEnough($s) { return (([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [long]$s.time) -ge (Get-MinAgeSec $s)) }
 function Check-SignalHealth {
     if (-not $TelegramToken) { return }
     $slot = [long][Math]::Floor([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() / 14400); $now = Get-MadridNow; $day = $now.ToString("yyyy-MM-dd")
@@ -114,7 +118,7 @@ function Check-SignalHealth {
     if (-not $doCrypto -and -not $doStocks) { return }
     Set-ReportState "salud" ("{0}|{1}" -f $(if ($doCrypto) { $slot } else { $lastSlot }), $(if ($doStocks) { $day } else { $lastDay }))
     $warned = @((Get-ReportState "saludw") -split ',' | Where-Object { $_ })
-    $cand = @(Read-Signals | Where-Object { $_.status -in 'open', 'pending' -and ($_.strat -in 'ruptura', 'ruptura-mercado', 'seg-grupo', 'seg-priv', 'aviso-momento' -or $_.manual -eq $true) -and $_.id -notin $warned })
+    $cand = @(Read-Signals | Where-Object { $_.status -in 'open', 'pending' -and ($_.strat -in 'ruptura', 'ruptura-mercado', 'seg-grupo', 'seg-priv', 'aviso-momento' -or $_.manual -eq $true) -and $_.id -notin $warned -and ($_.manual -eq $true -or (Test-SignalOldEnough $_)) })
     if (-not $cand.Count) { return }
     $tk = $null
     foreach ($s in $cand) {
@@ -126,7 +130,9 @@ function Check-SignalHealth {
             if (-not $ss) { continue }
             $sc = Get-MomScores $ss; if (-not $sc) { continue }
             $own = if ($sg -eq 1) { $sc.lg } else { $sc.st }; $opp = if ($sg -eq 1) { $sc.st } else { $sc.lg }
-            if (-not ($own.score -le 0 -and $opp.score -ge 6)) { continue }
+            if (-not ($own.score -le 0 -and $opp.score -ge 6)) { $pend = @((Get-ReportState "saludp") -split ',' | Where-Object { $_ -and $_ -ne $s.id }); Set-ReportState "saludp" ($pend -join ','); continue }
+            # persistencia: la lectura debe seguir dada la vuelta en DOS revisiones seguidas (≥4 h entre ambas) antes de avisar de cerrar; la primera vez solo se anota
+            $pend = @((Get-ReportState "saludp") -split ',' | Where-Object { $_ }); if ($s.id -notin $pend) { Set-ReportState "saludp" ((@($pend) + $s.id | Select-Object -Last 40) -join ','); continue }
             $px = [double]$ss.price; $pnl = $sg * ($px / [double]$s.entry - 1) * 100
             $neg = @($own.fx | Where-Object { $_ -like '⚠️*' } | Select-Object -First 4)
             $m = ("⚠️ CAMBIO SIGNIFICATIVO · {0} {1} · valora CERRAR o proteger la operación`nLa lectura del activo se ha dado la vuelta: para esta dirección puntúa {2} y para la contraria {3}.`nPrecio actual {4} frente a entrada {5} ({6:+0.0;-0.0}% sobre la entrada) · SL {7}" -f $sym, $(if ($sg -eq 1) { 'LARGO' } else { 'CORTO' }), $own.score, $opp.score, (TaFp $px), (TaFp ([double]$s.entry)), $pnl, (TaFp ([double]$s.sl)))
@@ -164,7 +170,9 @@ function Review-OpenPositions {
     $tk = $null; $chg = $false
     foreach ($s in @(Read-Signals | Where-Object { $_.status -eq 'open' -and $_.strat -in 'seg-priv', 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'tomada' -and -not ($_.strat -eq 'tomada' -and $_.origen -eq 'operacion') })) {
         try {
-            $dest = Get-RecDest $s; if (-not ($dest.priv -or $dest.group)) { continue }
+            if ($s.strat -ne 'tomada' -and $s.manual -ne $true -and -not (Test-SignalOldEnough $s)) { continue }      # una señal recién emitida no se "gestiona" hasta que pasen dos velas
+            $dest = Get-RecDest $s; $dest = @{ priv = $dest.priv; group = $false }      # los ajustes de SL/TP y la protección por noticias son solo para el chat privado; al grupo solo van señales, resultados y avisos de cerrar
+            if (-not $dest.priv) { continue }
             $isStock = ($s.src -eq 'yahoo'); $sym = $s.sym -replace 'USDT$', ''; $sg = [int]$s.side
             if ($isStock) { $ss = Get-YahooSeries $s.sym; if (-not $ss) { continue }; $px = [double]$ss.price; $msrc = @{ src = 'yahoo'; sym = $s.sym; exch = $ss.exch } }
             else { if (-not $tk) { $tk = @((Invoke-RestMethod "$($script:TrkBase)/tickers").data) }; $row = $tk | Where-Object symbol -eq $s.sym | Select-Object -First 1; if (-not $row) { continue }; $px = [double]$row.lastPrice; $msrc = @{ src = 'bitunix'; sym = $sym } }

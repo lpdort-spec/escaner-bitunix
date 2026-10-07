@@ -110,7 +110,7 @@ function Invoke-MomItems($kind, $items, [switch]$Dry) {
                     $act += $key; $sent++; $script:MomSent++
                 } elseif ($score -lt ($thr - 3) -and $key -in $act) {
                     # un aviso recien emitido no se invalida con el ruido del precio en vivo: hace falta que haya cerrado al menos una vela nueva (4h cripto, 1d acciones)
-                    $sgn = if ($side -eq 'L') { 1 } else { -1 }; $minAge = if ($kind -eq 'cripto') { 14400 } else { 86400 }
+                    $sgn = if ($side -eq 'L') { 1 } else { -1 }; $minAge = if ($kind -eq 'cripto') { 28800 } else { 86400 }
                     $emit = @($sigAll | Where-Object { $_.id -like "mom-$sym-$sgn-*" } | Sort-Object { [long]$_.time } -Descending | Select-Object -First 1)
                     if ($emit.Count -and ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [long]$emit[0].time) -lt $minAge) { continue }
                     $act = @($act | Where-Object { $_ -ne $key })
