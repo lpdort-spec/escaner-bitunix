@@ -64,7 +64,7 @@ function Score-Momento([int]$sg, $a4, $a1, $tvR, [double]$px, $sentVal, $fund) {
             $r0 = @($ress | Where-Object { $_.p -gt $px } | Sort-Object { $_.p } | Select-Object -First 1); $entry = if ($ext -and $r0) { [Math]::Min($r0[0].p, $px + 1.0 * $atr) } else { $px }
             $r1 = @($ress | Where-Object { $_.p -gt $entry } | Sort-Object { $_.p } | Select-Object -First 1); $sl = if ($r1) { $r1[0].p + 0.5 * $atr } else { $entry + 1.5 * $atr }
         }
-        $risk = $sg * ($entry - $sl); if ($risk -lt 0.8 * $atr) { $sl = $entry - $sg * 0.8 * $atr }; if ($risk -gt 2.0 * $atr) { $sl = $entry - $sg * 2.0 * $atr }; $R = $sg * ($entry - $sl)
+        $risk = $sg * ($entry - $sl); if ($risk -lt 1.5 * $atr) { $sl = $entry - $sg * 1.5 * $atr }; if ($risk -gt 2.5 * $atr) { $sl = $entry - $sg * 2.5 * $atr }; $R = $sg * ($entry - $sl)      # SL entre 1,5 y 2,5 ATR(4h): con 0,8-1,0 ATR el backtest da -0,14R/-0,10R y con 1,5 ATR -0,04R; en las señales reales 11 de 11 con SL < 2,5% fueron al SL (09/10/2026)
         if ($R -gt 0) {
             $ob = @(if ($sg -eq 1) { $ress | Where-Object { $_.p -gt $entry } | Sort-Object { $_.p } | Select-Object -First 1 } else { $sups | Where-Object { $_.p -lt $entry } | Sort-Object { $_.p } -Descending | Select-Object -First 1 })
             $room = if ($ob) { [Math]::Abs($ob[0].p - $entry) / $R } else { 99.0 }
