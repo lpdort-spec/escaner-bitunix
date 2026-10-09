@@ -28,5 +28,11 @@
     "sym": "BTC", "side": 1, "entry": 85778.5, "sl": 84300, "tp": 88740,
     "margin": 237.4198, "lev": 20, "qty": 0.0547,
     "note": "Operación real de Luis en Bitunix (captura 2026-10-05): BTCUSDT largo x20, aislado; SL y TP propuestos por el bot (SL 84.300; TP parcial 87.250 y final 88.740)"
+  },
+  {
+    "id": "manual-btc-20261009-corto",
+    "sym": "BTC", "side": -1, "entry": 83161.6, "sl": 83587.6, "tp": 81883.6,
+    "margin": 160.189, "lev": 40, "qty": 0.0752,
+    "note": "Operación real de Luis en Bitunix (captura 2026-10-09): BTCUSDT CORTO x40, aislado, margen 160,19. SIN SL NI TP en el exchange al registrarla (liquidación 85.020,9 = 2,2% sobre la entrada). SL y TP propuestos por el bot: SL = 20% del margen (≈32 USDT, +0,51% = 83.587,6); TP final 3R = 81.883,6 (TP parcial 82.735,6; TP2 82.309,5). Solo seguimiento: los pone Luis en el exchange."
   }
 ]
