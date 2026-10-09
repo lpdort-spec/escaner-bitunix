@@ -61,6 +61,7 @@ function Send-BallenasIfDue {
     if ($first) { Write-Host ("  [ballenas] primera pasada: {0} posiciones >= {1:N0} USD registradas, sin avisos" -f $cur.Count, $min) -ForegroundColor DarkGray; return }
     if (-not $new.Count) { return }
     $bx = @{}; try { foreach ($t in (Invoke-RestMethod "$($script:CmdBase)/tickers" -TimeoutSec 20).data) { $bx[($t.symbol -replace 'USDT$', '')] = 1 } } catch {}
+    if (Get-Command Run-MesaObs -ErrorAction SilentlyContinue) { try { Run-MesaObs @($new | ForEach-Object { $cur[$_] }) } catch {} }      # observación silenciosa de la mesa de ballenas
     $sent = 0
     foreach ($k in $new) { if ($sent -ge 5) { break }
         $m = Format-BallAlert $cur[$k] ($bx.ContainsKey($cur[$k].coin)); try { Send-ToSignalChats $m } catch {}; if ($script:MktChat) { try { Send-Tg $TelegramToken $script:MktChat $m $null } catch {} }; $sent++ }
