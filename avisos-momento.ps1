@@ -75,6 +75,7 @@ function Register-MomSignal($kind, $sym, $lv, $plan) {      # cada aviso emitido
             id = "mom-$sym-$($lv.sg)-$now"; time = $now; sym = $(if ($kind -eq 'cripto') { "${sym}USDT" } else { $sym }); src = $(if ($kind -eq 'cripto') { $null } else { 'yahoo' }); tf = $(if ($kind -eq 'cripto') { '4h' } else { '1d' }); strat = 'aviso-momento'; side = $lv.sg
             entryType = $(if ($plan.pullback) { 'limit' } else { 'market' }); entry = $lv.entry; sl = $lv.sl; tp1 = $lv.t1; tp2 = $lv.t2; tp3 = $lv.t3; riskAbs = [Math]::Abs($lv.entry - $lv.sl); slPct = $lv.slPct; lev = $lv.lev
             status = $(if ($plan.pullback) { 'pending' } else { 'open' }); stage = 0; realized = 0.0; age = 0; expiry = 6; lastLabel = $last; lab0 = $last; cost = $(if ($kind -eq 'cripto') { 0.0015 } else { 0.0010 }); outcome = $null; R = $null; net = $null
+            ctxFlags = $(if ($null -ne $plan.emaObs) { "emaObs=$($plan.emaObs);sweep=$($plan.sweep)" } else { $null })
         })
     } catch {}
 }

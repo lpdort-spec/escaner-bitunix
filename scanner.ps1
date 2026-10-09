@@ -360,6 +360,8 @@ function Scan($iv) {
             $photo = $null
             if (Send-Alert $key $msg $photo) {
                 if ($genMsg -and $TelegramToken) { try { Send-Tg $TelegramToken $script:MktChat $genMsg $null } catch {} }
+                $esf = ''; try { if (Get-Command Get-EmaSweepFlags -ErrorAction SilentlyContinue) { $esf = Get-EmaSweepFlags $sgn $name ([double]$entry) ([double]$risk) ([double]$entry) } } catch {}      # EMA a <= 1R y barrido, para medir con señales reales
+                $ctxCode = (@("$ctxCode", $esf) | Where-Object { $_ }) -join ';'
                 Add-SignalRecord ([ordered]@{
                     id = $key; time = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); sym = $t.symbol; tf = $iv; strat = $strat; side = $sgn
                     entryType = $entryType; entry = $entry; sl = $sl; tp1 = $tp1; tp2 = $tp2; tp3 = $tp3; riskAbs = $risk; slPct = $slPct
