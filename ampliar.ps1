@@ -24,7 +24,7 @@ function Get-AmpliarReport($sym, [double]$target, [double]$limitPx) {
     $pnlPct = $sg * ($px / $pos.entry - 1) * 100
     $c1 = $px; $c2 = $px - $sg * 0.5 * $atr; $c3 = if ($sg * ($px - $swing) -gt 0.3 * $atr) { $swing } else { $px - $sg * 1.0 * $atr }
     $cands = @(@("a mercado (ahora)", $c1), @("limit a 0,5 ATR de 1h ($(TaFp $c2))", $c2), @("limit en el último soporte/resistencia 1h ($(TaFp $c3))", $c3)); if ($limitPx -gt 0) { $cands = @(@("tu precio ($(TaFp $limitPx))", $limitPx)) + $cands }
-    $L = @(); $L += ("🧮 AMPLIAR {0} {1} x{2:N0} · tienes {3:N0} USDT de margen, entrada {4}, SL {5}, TP {6} · precio ahora {7} ({8:+0.0;-0.0}% sobre tu entrada)" -f $sym, $dir, $pos.lev, $pos.margin, (TaFp $pos.entry), (TaFp $pos.sl), (TaFp $pos.tp), (TaFp $px), $pnlPct)
+    $L = @(); $L += ("🧮 AMPLIAR {0} {1} x{2:N0} · tienes {3:N0} USDT de margen, entrada {4}, SL {5}, TP {6} · precio ahora {7} ({8})" -f $sym, $dir, $pos.lev, $pos.margin, (TaFp $pos.entry), (TaFp $pos.sl), (TaFp $pos.tp), (TaFp $px), $(if ($pnlPct -ge 0) { "{0:N1}% a tu favor" -f $pnlPct } else { "{0:N1}% en contra" -f [Math]::Abs($pnlPct) }))
     $L += ("   Añadir {0:N0} USDT de margen para llegar a {1:N0} (misma palanca y mismo SL)" -f $add, $target); $L += ""
     $base = Get-AmpliarScenario $pos 0.0001 $px; $L += ("   Hoy: pierdes ≈ {0:N0} USDT ({1:N0}% del margen) si salta el SL y ganas ≈ {2:N0} USDT con el TP" -f $base.lossSl, ($base.lossSl / $pos.margin * 100), $base.gainTp); $L += ""
     $ok35 = @()
@@ -35,6 +35,7 @@ function Get-AmpliarReport($sym, [double]$target, [double]$limitPx) {
     try { $s = @{ src = 'bitunix'; sym = $sym; name = "$sym/USDT"; currency = 'USDT'; exch = ''; price = $px; extra = @{ funding = $null } }; $r = Get-MomScores $s
         if ($r) { $me = if ($sg -eq 1) { $r.lg } else { $r.st }; $op = if ($sg -eq 1) { $r.st } else { $r.lg }; $own = [int]$me.score; $opp = [int]$op.score; $tmg = if ($null -ne $me.timing) { [int]$me.timing } else { 0 }; $neg = @($me.fx | Where-Object { $_ -like '⚠️*' } | Select-Object -First 3) } } catch {}
     $L += ""; if ($null -ne $own) { $L += ("🧭 Lectura actual para tu dirección: puntuación {0} (contraria {1}){2}" -f $own, $opp, $(if ($tmg -ne 0) { "; timing 1h {0:+0;-0}" -f $tmg } else { "" })); $neg | ForEach-Object { $L += "   $_" } }
+    try { if (Get-Command Get-MultiTfLine -ErrorAction SilentlyContinue) { $mt = Get-MultiTfLine $sg $sym $px; if ($mt) { $L += $mt } } } catch {}      # 15m, 1h, 4h, 1D, 1S y 1M frente a tu dirección
     # veredicto con reglas fijas
     $verd = ""; $why = @()
     if ($sg * ($px - $pos.entry) -lt 0) {      # promediando a la baja (largo) / al alza (corto)

@@ -47,6 +47,7 @@ function Handle-Opinion($ra) {
     # 3) lectura del bot para ese lado
     $L += ""; $L += ("📊 Lectura del bot para un {0}: puntuación {1} (el lado contrario {2}){3}" -f $dir.ToLower(), $score, [int]$opp.score, $(if ($null -ne $me.timing -and [int]$me.timing -ne 0) { "; timing 1h {0:+0;-0}" -f [int]$me.timing } else { "" }))
     @($me.fx | Where-Object { $_ -like '✅*' } | Select-Object -First 3) | ForEach-Object { $L += "   $_" }; @($me.fx | Where-Object { $_ -like '⚠️*' } | Select-Object -First 3) | ForEach-Object { $L += "   $_" }
+    if ($s.src -eq 'bitunix') { try { if (Get-Command Get-MultiTfLine -ErrorAction SilentlyContinue) { $mt = Get-MultiTfLine $side ($s.sym -replace 'USDT$', '') $px; if ($mt) { $L += ""; $L += $mt } } } catch {} }      # 15m, 1h, 4h, 1D, 1S y 1M frente a la idea
     # 4) posicionamiento de los mejores traders (si hay datos)
     try { if (Get-Command Get-SmartMoneyLines -ErrorAction SilentlyContinue) { $sm = @(Get-SmartMoneyLines ($s.sym -replace '\.MC$', '')); $sm = @($sm | Where-Object { $_ -notlike '*Datos oficiales*' -and $_ -notlike '*Interés abierto*' -and $_ -notlike '*Volumen agresivo*' } | Select-Object -First 4); if ($sm.Count) { $L += ""; $L += $sm } } } catch {}
     # 5) noticias

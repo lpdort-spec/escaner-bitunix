@@ -131,6 +131,7 @@ function Format-CapturaAnalysis($p, [bool]$register, [string]$who) {
         $k = @($k | Select-Object -Last 48)
         $recent = if ($sg -eq 1) { ($k | ForEach-Object { [double]$_.high } | Measure-Object -Maximum).Maximum } else { ($k | ForEach-Object { [double]$_.low } | Measure-Object -Minimum).Minimum } } catch {}
     if ($ext) { $L += ("   Bollinger 1h: media {0} · banda {1} {2} · RSI 1h {3:N0} · {4} de las últimas 3 velas cerraron fuera de la banda{5}" -f (TaFp $ext.mid), $(if ($sg -eq 1) { "sup." } else { "inf." }), (TaFp $(if ($sg -eq 1) { $ext.up } else { $ext.lo })), $ext.rsi, $ext.nOut, $(if ($ext.stretched) { " ⚠️ MOVIMIENTO ESTIRADO: lo habitual es volver hacia la media de 1h (" + (TaFp $ext.mid) + "); no persigas ni añadas aquí" } else { "" })) }
+    try { if (Get-Command Get-MultiTfLine -ErrorAction SilentlyContinue) { $mt = Get-MultiTfLine $sg $sym $px; if ($mt) { $L += $mt } } } catch {}      # 15m, 1h, 4h, 1D, 1S y 1M frente a tu dirección
     # veredicto con reglas fijas
     $L += ""; $verdict = "MANTENER"; $why = @()
     if (-not $sl) { $verdict = "PROTEGER YA"; $why += "no tiene stop: una posición sin SL puede liquidarse. Pon uno ahora (sugerido {0})" -f (TaFp ($en - $sg * [Math]::Max(1.2 * $atr, 0.02 * $en))) }

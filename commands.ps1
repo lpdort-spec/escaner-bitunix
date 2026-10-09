@@ -276,7 +276,7 @@ function Register-ManualFromArgs($ra) {
     $chk = ""; try { if (Get-Command Get-RiskCheck -ErrorAction SilentlyContinue) { $chk = "`n`n" + (Get-RiskCheck $symR $sg $en $sl $tp $mg $lv) } } catch {}
     $r = Register-ManualTrade $symR $sg $en $sl $tp $mg $lv
     $live = ""; try { if (Get-Command Add-LiveOrder -ErrorAction SilentlyContinue) { Add-LiveOrder $symR $sg $en $sl $tp $mg $lv "operacion" "Luis"; $live = "`n👁️ La vigilo además EN VIVO (cada ~40 s): te aviso de TP1/TP2/TP final, cercanía al SL y cambios de lectura." } } catch {}
-    return ("✅ Operación {0}: {1} {2} x{3:N0} · entrada {4} · SL {5} · TP {6} · margen {7:N2} USDT.`nQueda en el seguimiento: se resolverá sola con las velas de 1h (SL o TP) y saldrá en el informe diario y semanal. Si la cierras a mano, avísame con /cerrar {1} PRECIO." -f $r.action, $symR, $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), $lv, (Fpx $en), (Fpx $sl), (Fpx $tp), $mg) + $live + $chk
+    return ("✅ Operación {0}: {1} {2} x{3:N0} · entrada {4} · SL {5} · TP {6} · margen {7:N2} USDT.`nQueda en el seguimiento: te aviso EN VIVO con el precio y la lectura de 15m, 1h, 4h, 1D, 1S y 1M; el resultado definitivo (SL o TP) se confirma con los máximos y mínimos de las velas de 1h para no perder ningún toque, y saldrá en el informe diario y semanal. Si la cierras a mano, avísame con /cerrar {1} PRECIO." -f $r.action, $symR, $(if ($sg -eq 1) { "LARGO" } else { "CORTO" }), $lv, (Fpx $en), (Fpx $sl), (Fpx $tp), $mg) + $live + $chk
 }
 function Close-ManualFromArgs($ra) {
     $uso = "Uso: /cerrar PAR PRECIO_DE_SALIDA`nEjemplo: /cerrar ETH 2690.5"

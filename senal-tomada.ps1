@@ -87,6 +87,7 @@ function Handle-SenalTomada($ra, $chat = $null, $who = "") {
         @($me.fx | Where-Object { $_ -like '⚠️*' } | Select-Object -First 3) | ForEach-Object { $L += "   $_" }
         @($me.fx | Where-Object { $_ -like '✅*' } | Select-Object -First 2) | ForEach-Object { $L += "   $_" }
     }
+    if (-not $isStock) { try { if (Get-Command Get-MultiTfLine -ErrorAction SilentlyContinue) { $mt = Get-MultiTfLine $sg $s0 $(if ($px -gt 0) { $px } else { $entry }); if ($mt) { $L += ""; $L += $mt } } } catch {} }      # 15m, 1h, 4h, 1D, 1S y 1M frente a tu dirección
     if ($isPriv -and -not $isStock) {      # reglas personales de Luis (margen, SL <= 20% del margen, reentradas...)
         $mgEst = if ($sig.margin) { [double]$sig.margin } else { 200 }
         try { $L += ""; $L += (Get-RiskCheck $s0 $sg $entry $sl $t3 $mgEst $lev) } catch {}
@@ -108,10 +109,14 @@ function Add-LiveOrder($sym, [int]$sg, [double]$en, [double]$sl, [double]$tp, [d
     $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $all2 = @(Read-Signals); $dirty = $false
     foreach ($r in $all2) { if ($r.strat -eq 'tomada' -and $r.status -eq 'open' -and $r.sym -eq "${sym}USDT" -and $r.dest -eq 'priv') { $r.status = 'closed'; $r.outcome = 'sustituida por un registro nuevo'; $r.closedAt = $now; $dirty = $true } }
     if ($dirty) { Save-Signals $all2 }
-    $R = [Math]::Abs($en - $sl); if ($R -le 0) { return }
+    # SL en BENEFICIO (corto con SL bajo la entrada / largo con SL sobre ella): no hay riesgo inicial; la R de referencia es el % máximo del margen (regla de Luis), igual que en las operaciones manuales
+    $prot = (($sg * ($sl - $en)) -gt 0)
+    $R = if ($prot) { (Get-SlMaxPct) / 100 * $mg / [Math]::Max($mg * $lv / $en, 1e-12) } else { [Math]::Abs($en - $sl) }; if ($R -le 0) { return }
+    $t1 = ($en + $sg * [Math]::Abs($tp - $en) / 3); $t2 = ($en + $sg * 2 * [Math]::Abs($tp - $en) / 3); $st0 = 0
+    if ($prot) { try { $px0 = [double](@((Invoke-RestMethod "$($script:CmdBase)/tickers?symbols=${sym}USDT" -TimeoutSec 15).data | Select-Object -First 1)[0].lastPrice); if ($px0 -gt 0) { if ($sg * ($px0 - $t2) -ge 0) { $st0 = 2 } elseif ($sg * ($px0 - $t1) -ge 0) { $st0 = 1 } } } catch {} }      # ya va por delante: no se avisa de objetivos que ya pasaron antes de registrarla
     Add-SignalRecord ([ordered]@{
-        id = "tomada-$sym-$now"; time = $now; sym = "${sym}USDT"; src = $null; tf = '4h'; strat = 'tomada'; dest = 'priv'; by = "$who"; chat = ""; side = $sg; entryType = 'market'
-        entry = $en; sl = $sl; sl0 = $sl; tp1 = ($en + $sg * [Math]::Abs($tp - $en) / 3); tp2 = ($en + $sg * 2 * [Math]::Abs($tp - $en) / 3); tp3 = $tp; riskAbs = $R; slPct = ($R / $en * 100); lev = $lv; margin = $mg; status = 'open'; stage = 0; realized = 0.0; age = 0; lastLabel = 0; lab0 = 0
+        id = "tomada-$sym-$now"; time = $now; sym = "${sym}USDT"; src = $null; tf = '4h'; strat = 'tomada'; dest = 'priv'; by = "$who"; chat = ""; side = $sg; entryType = 'market'; prot = $prot
+        entry = $en; sl = $sl; sl0 = $sl; tp1 = $t1; tp2 = $t2; tp3 = $tp; riskAbs = $R; slPct = ($R / $en * 100); lev = $lv; margin = $mg; status = 'open'; stage = $st0; realized = 0.0; age = 0; lastLabel = 0; lab0 = 0
         cost = 0.0015; outcome = $null; R = $null; net = $null; ctxScore = $null; chkAt = $now; closeNote = ""; origen = $origen; note = "Operación registrada con /$origen"
     })
 }
@@ -127,16 +132,19 @@ function Watch-TakenOrders {
             if ($s.src -eq 'yahoo') { $px = Get-LiveOrderPrice $s } else { if (-not $tk) { $tk = @((Invoke-RestMethod "$($script:CmdBase)/tickers" -TimeoutSec 20).data) }; $row = $tk | Where-Object symbol -eq $s.sym | Select-Object -First 1; $px = if ($row) { [double]$row.lastPrice } else { 0.0 } }
             if ($px -le 0) { continue }
             $who = if ($s.by) { " (de $($s.by))" } else { "" }; $head = "{0} {1}{2}" -f $sym, $dir, $who
-            $pct = $sg * ($px / $en - 1) * 100; $stage = [int]$s.stage; $slEff = if ($stage -ge 1) { $en } else { [double]$s.sl }
+            $pct = $sg * ($px / $en - 1) * 100; $stage = [int]$s.stage
+            $prot = (($sg * ([double]$s.sl - $en)) -gt 0)      # SL ya en beneficio (se mueve por el usuario): se respeta; solo se lleva a la entrada si estaba peor que ella
+            $slEff = [double]$s.sl; if ($stage -ge 1 -and $sg * ($en - $slEff) -gt 0) { $slEff = $en }
             $msgs = @(); $closeOut = $null; $closeR = 0.0
             # 1) stop
             if ($sg * ($px - $slEff) -le 0) {
-                if ($stage -eq 0) { $msgs += ("❌ STOP LOSS · {0}`nEl precio ({1}) ha tocado el SL ({2}). Si tu stop no se ha ejecutado ya, cierra: la operación está invalidada. Pérdida ≈ -1R (≈ {3:N0}% del margen con x{4:N0})." -f $head, (TaFp $px), (TaFp $slEff), ([double]$s.slPct * [double]$s.lev), [double]$s.lev); $closeOut = 'SL'; $closeR = -1.0 }
+                if ($prot) { $lk = $sg * ($slEff / $en - 1) * 100; $msgs += ("🔒 SL EN BENEFICIO TOCADO · {0}`nEl precio ({1}) ha tocado tu SL ({2}), que estaba en beneficio: la operación cierra con ≈ {3:+0.0;-0.0}% del precio{4}. Si tu stop no se ha ejecutado ya, ciérrala." -f $head, (TaFp $px), (TaFp $slEff), $lk, $(if ($s.margin -and $s.lev) { " (≈ {0:+0;-0} USDT)" -f ([double]$s.margin * [double]$s.lev * $lk / 100) } else { "" })); $closeOut = 'SL en beneficio'; $closeR = [double]$s.realized + $sg * ($slEff - $en) / $R }
+                elseif ($stage -eq 0) { $msgs += ("❌ STOP LOSS · {0}`nEl precio ({1}) ha tocado el SL ({2}). Si tu stop no se ha ejecutado ya, cierra: la operación está invalidada. Pérdida ≈ -1R (≈ {3:N0}% del margen con x{4:N0})." -f $head, (TaFp $px), (TaFp $slEff), ([double]$s.slPct * [double]$s.lev), [double]$s.lev); $closeOut = 'SL'; $closeR = -1.0 }
                 else { $msgs += ("➖ CIERRE EN LA ENTRADA · {0}`nEl precio ({1}) ha vuelto a tu entrada ({2}) tras el parcial: cierra el resto; el beneficio ya asegurado en los parciales se mantiene." -f $head, (TaFp $px), (TaFp $en)); $closeOut = $(if ($stage -eq 1) { 'TP1 + BE' } else { 'TP2 + BE' }); $closeR = [double]$s.realized }
             } else {
                 # 2) objetivos, en orden
-                if ($stage -eq 0 -and $sg * ($px - [double]$s.tp1) -ge 0) { $stage = 1; $s.stage = 1; $s.realized = 1.0 / 3; $msgs += ("✅ TP1 ALCANZADO · {0} ({1})`nCierra un TERCIO (parcial) y MUEVE el SL a tu entrada ({2}): desde aquí no puede dar pérdida, salvo comisiones." -f $head, (TaFp $s.tp1), (TaFp $en)) }
-                if ($stage -eq 1 -and $sg * ($px - [double]$s.tp2) -ge 0) { $stage = 2; $s.stage = 2; $s.realized = 1.0 / 3 + (2.0 / 3); $msgs += ("✅ TP2 ALCANZADO · {0} ({1})`nCierra otro tercio y SUBE el SL a la zona del TP1 ({2}) para asegurar beneficio. Queda el último tercio hacia el TP final ({3})." -f $head, (TaFp $s.tp2), (TaFp $s.tp1), (TaFp $s.tp3)) }
+                if ($stage -eq 0 -and $sg * ($px - [double]$s.tp1) -ge 0) { $stage = 1; $s.stage = 1; $s.realized = 1.0 / 3; if ($prot) { $msgs += ("✅ TP1 ALCANZADO · {0} ({1})`nPuedes cerrar un TERCIO (parcial). Tu SL ya está en beneficio ({2}): no hace falta moverlo." -f $head, (TaFp $s.tp1), (TaFp $slEff)) } else { $msgs += ("✅ TP1 ALCANZADO · {0} ({1})`nCierra un TERCIO (parcial) y MUEVE el SL a tu entrada ({2}): desde aquí no puede dar pérdida, salvo comisiones." -f $head, (TaFp $s.tp1), (TaFp $en)) } }
+                if ($stage -eq 1 -and $sg * ($px - [double]$s.tp2) -ge 0) { $stage = 2; $s.stage = 2; $s.realized = 1.0 / 3 + (2.0 / 3); if ($prot -and $sg * ([double]$s.tp1 - $slEff) -le 0) { $msgs += ("✅ TP2 ALCANZADO · {0} ({1})`nPuedes cerrar otro tercio. Tu SL ({2}) ya asegura más que la zona del TP1: mantenlo. Queda el último tercio hacia el TP final ({3})." -f $head, (TaFp $s.tp2), (TaFp $slEff), (TaFp $s.tp3)) } else { $msgs += ("✅ TP2 ALCANZADO · {0} ({1})`nCierra otro tercio y SUBE el SL a la zona del TP1 ({2}) para asegurar beneficio. Queda el último tercio hacia el TP final ({3})." -f $head, (TaFp $s.tp2), (TaFp $s.tp1), (TaFp $s.tp3)) } }
                 if ($stage -eq 2 -and $sg * ($px - [double]$s.tp3) -ge 0) { $msgs += ("🏆 TP FINAL ALCANZADO · {0} ({1})`nCierra el último tercio. Operación completada." -f $head, (TaFp $s.tp3)); $closeOut = 'TP3'; $closeR = [double]$s.realized + 3.0 / 3 }
                 if (-not $closeOut) {
                     # 3) cerca del SL (una vez)
@@ -147,7 +155,9 @@ function Watch-TakenOrders {
                         $s.chkAt = $nowS; $sc = Get-LiveScores $s $px
                         if ($sc) {
                             $me = if ($sg -eq 1) { $sc.lg } else { $sc.st }; $opp = if ($sg -eq 1) { $sc.st } else { $sc.lg }; $neg = @($me.fx | Where-Object { $_ -like '⚠️*' } | Select-Object -First 3)
-                            if ($me.score -le 0 -and $opp.score -ge 6 -and $tok -notlike '*C*') { $tok += "C"; $msgs += ("⛔ VALORA CERRAR · {0}`nLa lectura del activo se ha dado la vuelta: para tu dirección puntúa {1} y para la contraria {2}. Precio {3} ({4:+0.0;-0.0}% sobre tu entrada), SL {5}.`n{6}`nEl bot no cierra nada: decides tú." -f $head, $me.score, $opp.score, (TaFp $px), $pct, (TaFp $slEff), (($neg | ForEach-Object { "   $_" }) -join "`n")) }
+                            if ($me.score -le 0 -and $opp.score -ge 6 -and $tok -notlike '*C*') { $tok += "C"; $pcTxt = if ($pct -ge 0) { "{0:N1}% a tu favor desde tu entrada" -f $pct } else { "{0:N1}% EN CONTRA desde tu entrada" -f [Math]::Abs($pct) }; $usdTxt = ""; if ($s.margin -and $s.lev) { $nom = [double]$s.margin * [double]$s.lev; $lkp = $sg * ($slEff / $en - 1) * 100; $usdTxt = "`n   Latente ≈ {0:+0;-0} USDT · con tu SL ({1}) cerrarías en ≈ {2:+0;-0} USDT{3}" -f ($nom * $pct / 100), (TaFp $slEff), ($nom * $lkp / 100), $(if ($prot) { " (ya en beneficio: puedes dejarlo correr o tomar un parcial)" } else { "" }) }
+                                try { if (Get-Command Get-MultiTfLine -ErrorAction SilentlyContinue) { $mm = Get-MultiTfLine $sg $sym $px; if ($mm) { $usdTxt += "`n" + $mm } } } catch {}      # 15m, 1h, 4h, 1D, 1S y 1M frente a tu dirección
+                                $tok += "C"; $msgs += ("⛔ VALORA CERRAR · {0}`nLa lectura del activo se ha dado la vuelta: para tu dirección puntúa {1} y para la contraria {2}. Precio {3} ({4}), SL {5}.{7}`n{6}`nEl bot no cierra nada: decides tú." -f $head, $me.score, $opp.score, (TaFp $px), $pcTxt, (TaFp $slEff), (($neg | ForEach-Object { "   $_" }) -join "`n"), $usdTxt) }
                             elseif ($null -ne $s.ctxScore -and ([int]$s.ctxScore - [int]$me.score) -ge 4 -and $pct -gt 0 -and $tok -notlike '*D*') { $tok += "D"; $msgs += ("🔔 SE DEBILITA · {0}`nLa puntuación ha bajado de {1} a {2} y vas en beneficio ({3:+0.0;-0.0}%): valora tomar un parcial y subir el SL a {4}.`n{5}" -f $head, $s.ctxScore, $me.score, $pct, (TaFp $(if ($stage -ge 1) { $en } else { $en + $sg * 0.1 * $R })), (($neg | ForEach-Object { "   $_" }) -join "`n")) }
                         }
                     }

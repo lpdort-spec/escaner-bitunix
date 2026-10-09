@@ -113,6 +113,7 @@ function Get-MomentoReport($raw, $mode, $wantSide) {
     elseif ([Math]::Max($lg.score, $st.score) -ge 1) { $L += "➡️ Conclusión: no hay un lado claramente favorable; lo más sensato es esperar un retroceso a un nivel o una confirmación." }
     else { $L += "➡️ Conclusión: ahora mismo los dos lados tienen más factores en contra que a favor; esperar es una posición válida." }
     $L += ""; $L += ("Factores del {0}:" -f $best.dir); foreach ($f in $best.fx) { $L += "   $f" }
+    if ($s.src -eq 'bitunix' -and (Get-Command Get-MultiTfLine -ErrorAction SilentlyContinue)) { try { $mt = Get-MultiTfLine $(if ($best.dir -eq 'largo') { 1 } else { -1 }) ($s.sym -replace 'USDT$', '') $px; if ($mt) { $L += ""; $L += $mt } } catch {} }      # 15m, 1h, 4h, 1D, 1S y 1M
     if ($best.plan -and $best.score -ge 1) {
         $p = $best.plan; $dirU = if ($best.dir -eq "largo") { "COMPRA" } else { "VENTA en corto" }
         $L += ""; $L += "🎯 Plan orientativo (si decides entrar; no es una señal validada):"
