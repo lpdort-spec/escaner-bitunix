@@ -66,13 +66,13 @@ function Build-MomAlert($kind, $sym, $side, $score, $plan = $null, $notes = $nul
     $lv = Get-OrderLevels $side $plan $kind $score; if (-not $lv) { return $null }
     return (Format-CompactSignal $lv.sg ($(if ($kind -eq 'cripto') { "$sym/USDT" } else { "$sym" })) $score $lv.entry ([bool]$plan.pullback) $lv.lev $lv.sl $lv.t1 $lv.t2 $lv.t3 $kind $(if ($kind -eq 'cripto') { '4h' } else { '1d' }) $notes)
 }
-function Register-MomSignal($kind, $sym, $lv, $plan) {      # cada aviso emitido queda registrado: se vigila (cambios de lectura, nuevos SL/TP) igual que las rupturas
+function Register-MomSignal($kind, $sym, $lv, $plan, $obs = $false) {      # cada aviso emitido queda registrado: se vigila (cambios de lectura, nuevos SL/TP) igual que las rupturas
     try {
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $last = [long]0
         if ($kind -eq 'cripto') { $k = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=${sym}USDT&interval=4h&limit=3" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $last = [long]$k[$k.Count - 1].time }
         else { $b = Get-MktBars $sym; if ($b) { $last = [long]$b.t[$b.n - 1] } }
         Add-SignalRecord ([ordered]@{
-            id = "mom-$sym-$($lv.sg)-$now"; time = $now; sym = $(if ($kind -eq 'cripto') { "${sym}USDT" } else { $sym }); src = $(if ($kind -eq 'cripto') { $null } else { 'yahoo' }); tf = $(if ($kind -eq 'cripto') { '4h' } else { '1d' }); strat = 'aviso-momento'; side = $lv.sg
+            id = "$(if ($obs) { 'momobs' } else { 'mom' })-$sym-$($lv.sg)-$now"; time = $now; sym = $(if ($kind -eq 'cripto') { "${sym}USDT" } else { $sym }); src = $(if ($kind -eq 'cripto') { $null } else { 'yahoo' }); tf = $(if ($kind -eq 'cripto') { '4h' } else { '1d' }); strat = $(if ($obs) { 'arranque-obs' } else { 'aviso-momento' }); side = $lv.sg
             entryType = $(if ($plan.pullback) { 'limit' } else { 'market' }); entry = $lv.entry; sl = $lv.sl; tp1 = $lv.t1; tp2 = $lv.t2; tp3 = $lv.t3; riskAbs = [Math]::Abs($lv.entry - $lv.sl); slPct = $lv.slPct; lev = $lv.lev
             status = $(if ($plan.pullback) { 'pending' } else { 'open' }); stage = 0; realized = 0.0; age = 0; expiry = 6; lastLabel = $last; lab0 = $last; cost = $(if ($kind -eq 'cripto') { 0.0015 } else { 0.0010 }); outcome = $null; R = $null; net = $null
             ctxFlags = $(if ($null -ne $plan.emaObs) { "emaObs=$($plan.emaObs);sweep=$($plan.sweep)" } else { $null })
@@ -81,6 +81,8 @@ function Register-MomSignal($kind, $sym, $lv, $plan) {      # cada aviso emitido
 }
 # Procesa una lista de elementos; devuelve nº de avisos enviados. -Dry: solo muestra puntuaciones, no envía ni guarda estado.
 function Invoke-MomItems($kind, $items, [switch]$Dry) {
+    # Desde 09/10/2026 los avisos de buen momento van en OBSERVACION SILENCIOSA (no se envian; se registran como 'arranque-obs'): en las señales reales 4 de 20 cerradas ganaron (-0,71R) y el backtest no muestra ventaja. Se reactivan con chats.json "momentoAvisos": true.
+    $silent = -not ("$(Get-MomCfg 'momentoAvisos' $false)" -match '^(true|1)$')
     $thr = [int](Get-MomCfg 'umbralMomento' 7); $act = @(Get-MomAct); $sent = 0; $cap = 8; $sigAll = @(); try { $sigAll = @(Read-Signals | Where-Object { $_.strat -eq 'aviso-momento' }) } catch {}
     foreach ($it in $items) {
         if (($script:cmdTick++ % 10) -eq 0) { try { Poll-Commands } catch {}; try { Watch-TakenOrders } catch {} }
@@ -105,9 +107,11 @@ function Invoke-MomItems($kind, $items, [switch]$Dry) {
                         if ($slx) { if ($slx.skip) { continue }; $score = $score + [int]$slx.delta; if ($score -lt $thr) { continue } }
                     }
                     $msg = Build-MomAlert $kind $sym $side $score $plan @($slx.note, $slx.ctx); if (-not $msg) { continue }
-                    if ($kind -eq 'cripto') { Send-ToSignalChats $msg }
-                    if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $msg $null }
-                    try { Register-MomSignal $kind $sym (Get-OrderLevels $side $plan $kind $score) $plan } catch {}
+                    if (-not $silent) {
+                        if ($kind -eq 'cripto') { Send-ToSignalChats $msg }
+                        if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $msg $null }
+                    }
+                    try { Register-MomSignal $kind $sym (Get-OrderLevels $side $plan $kind $score) $plan $silent } catch {}
                     $act += $key; $sent++; $script:MomSent++
                 } elseif ($score -lt ($thr - 3) -and $key -in $act) {
                     # un aviso recien emitido no se invalida con el ruido del precio en vivo: hace falta que haya cerrado al menos una vela nueva (4h cripto, 1d acciones)
@@ -120,7 +124,7 @@ function Invoke-MomItems($kind, $items, [switch]$Dry) {
                     $cm = "⚠️ CAMBIO SIGNIFICATIVO · $sym $(if ($side -eq 'L') { 'LARGO' } else { 'CORTO' }) · valora CERRAR o proteger la operación`nEl aviso de buen momento ya no se cumple: la puntuación bajó de $thr o más a $score."
                     if ($neg.Count) { $cm += "`nFactores que ahora están en contra:`n" + (($neg | ForEach-Object { "   $_" }) -join "`n") }
                     $cm += "`nEl bot no cierra nada: decides tú. Si no abriste esa operación, simplemente deja de estar vigente el aviso."
-                    if (-not $Dry) { if ($kind -eq 'cripto') { Send-ToSignalChats $cm }; if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $cm $null } }
+                    if (-not $Dry -and -not $silent) { if ($kind -eq 'cripto') { Send-ToSignalChats $cm }; if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $cm $null } }
                 }
             }
         } catch {}
