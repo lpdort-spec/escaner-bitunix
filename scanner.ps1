@@ -47,6 +47,7 @@ if (Test-Path (Join-Path $PSScriptRoot "ballenas.ps1")) { . (Join-Path $PSScript
 if (Test-Path (Join-Path $PSScriptRoot "expansion-obs.ps1")) { . (Join-Path $PSScriptRoot "expansion-obs.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "bollinger-obs.ps1")) { . (Join-Path $PSScriptRoot "bollinger-obs.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "mesa-ballenas.ps1")) { . (Join-Path $PSScriptRoot "mesa-ballenas.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "tendencia-obs.ps1")) { . (Join-Path $PSScriptRoot "tendencia-obs.ps1") }
 $TelegramSignalChatId = $env:TELEGRAM_SIGNAL_CHAT_ID
 if (-not $TelegramSignalChatId -and (Test-Path $cfg)) { try { $TelegramSignalChatId = (Get-Content $cfg -Raw | ConvertFrom-Json).signalChatId } catch {} }
 # destinos de las señales: el secreto del chat privado; si no está configurado, SOLO chats privados (id positivo), nunca grupos (id negativo)
@@ -490,6 +491,7 @@ do {
     try { Send-BallenasIfDue } catch {}
     try { Run-Expansion4hObsIfDue } catch {}
     try { Run-BollingerBajoObsIfDue } catch {}
+    try { Run-TendenciaObsIfDue } catch {}
     try { Notify-GroupTracking } catch {}
     try { Check-SignalHealth } catch {}
     try { Send-MacroRemindersIfDue } catch {}

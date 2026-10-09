@@ -3,23 +3,25 @@
 # reentradas en menos de 15 minutos tras una pérdida y apalancamientos muy altos donde las comisiones se comen el margen.
 function Get-MultiTfLine([int]$sg, $symR, [double]$px) {      # tendencia de cada marco (precio frente a EMA20 y EMA50) y RSI(14), frente a la dirección de la operación. Marcos: 15m, 1h, 4h, 1D, 1S (semanal) y 1M (mensual)
     if (-not (Get-Command Get-EmaValue -ErrorAction SilentlyContinue)) { return $null }
-    $parts = @(); $fav = 0; $con = 0; $mix = 0
-    foreach ($t in @(@('15m', '15m'), @('1h', '1h'), @('4h', '4h'), @('1d', '1D'), @('1w', '1S'), @('1M', '1M'))) {
-        try { $k = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=${symR}USDT&interval=$($t[0])&limit=200" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); if ($k.Count -lt 22) { $parts += ("· {0} sin historia suficiente" -f $t[1]); continue }
+    $main = @(); $aux = @(); $fav = 0; $con = 0; $mix = 0      # marcos PRINCIPALES (los que pesan en el veredicto): 4h, 1D, 1S y 1M; de APOYO (timing): 1h y 15m
+    foreach ($t in @(@('4h', '4h', 1), @('1d', '1D', 1), @('1w', '1S', 1), @('1M', '1M', 1), @('1h', '1h', 0), @('15m', '15m', 0))) {
+        try { $k = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=${symR}USDT&interval=$($t[0])&limit=200" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); if ($k.Count -lt 22) { $pt = ("· {0} sin historia suficiente" -f $t[1]); if ($t[2] -eq 1) { $main += $pt } else { $aux += $pt }; continue }
             $cl = @($k | ForEach-Object { [double]$_.close }); $cl[$cl.Count - 1] = $px
             $e20 = Get-EmaValue $cl 20; $e50 = $null; if ($cl.Count -ge 50) { $e50 = Get-EmaValue $cl 50 }
             $up = ($px -gt $e20) -and ($null -eq $e50 -or $e20 -gt $e50); $dn = ($px -lt $e20) -and ($null -eq $e50 -or $e20 -lt $e50)
             $g = 0.0; $ls = 0.0; for ($q = $cl.Count - 14; $q -lt $cl.Count; $q++) { $d = $cl[$q] - $cl[$q - 1]; if ($d -gt 0) { $g += $d } else { $ls -= $d } }; $rsi = if ($ls -eq 0) { 100 } else { 100 - 100 / (1 + $g / $ls) }
             $st = if ($up) { "alcista" } elseif ($dn) { "bajista" } else { "mixto" }
-            $ic = if ($sg -eq 0) { if ($up) { "↑" } elseif ($dn) { "↓" } else { "↔" } } elseif (($sg -eq 1 -and $up) -or ($sg -eq -1 -and $dn)) { $fav++; "✅" } elseif (($sg -eq 1 -and $dn) -or ($sg -eq -1 -and $up)) { $con++; "⚠️" } else { $mix++; "·" }
+            $fv = (($sg -eq 1 -and $up) -or ($sg -eq -1 -and $dn)); $ag = (($sg -eq 1 -and $dn) -or ($sg -eq -1 -and $up))
+            $ic = if ($sg -eq 0) { if ($up) { "↑" } elseif ($dn) { "↓" } else { "↔" } } elseif ($fv) { "✅" } elseif ($ag) { "⚠️" } else { "·" }
+            if ($t[2] -eq 1 -and $sg -ne 0) { if ($fv) { $fav++ } elseif ($ag) { $con++ } else { $mix++ } }
             $rn = if ($rsi -ge 70) { " (RSI {0:N0} sobrecompra)" -f $rsi } elseif ($rsi -le 30) { " (RSI {0:N0} sobreventa)" -f $rsi } else { "" }
-            $parts += ("{0} {1} {2}{3}" -f $ic, $t[1], $st, $rn)
-        } catch { $parts += ("· {0} sin datos" -f $t[1]) }
+            $pt = ("{0} {1} {2}{3}" -f $ic, $t[1], $st, $rn); if ($t[2] -eq 1) { $main += $pt } else { $aux += $pt }
+        } catch { $pt = ("· {0} sin datos" -f $t[1]); if ($t[2] -eq 1) { $main += $pt } else { $aux += $pt } }
     }
-    if (-not $parts.Count) { return $null }
-    if ($sg -eq 0) { return ("🕒 Marcos temporales (precio frente a EMA20/EMA50; ↑ alcista · ↓ bajista · ↔ mixto)`n   " + ($parts -join " · ")) }
-    $hi = if ($con -ge 4) { " ⚠️ la mayoría de marcos va en contra" } elseif ($fav -ge 4) { " ✔ la mayoría de marcos acompaña" } else { "" }
-    return ("🕒 Marcos temporales frente a tu {0}: {1} a favor · {2} en contra · {3} mixtos{5}`n   {4}" -f $(if ($sg -eq 1) { "largo" } else { "corto" }), $fav, $con, $mix, ($parts -join " · "), $hi)
+    if (-not $main.Count -and -not $aux.Count) { return $null }
+    if ($sg -eq 0) { return ("🕒 Marcos temporales (precio frente a EMA20/EMA50; ↑ alcista · ↓ bajista · ↔ mixto)`n   Principales: " + ($main -join " · ") + "`n   Apoyo (corto plazo): " + ($aux -join " · ")) }
+    $hi = if ($con -ge 3) { " ⚠️ la mayoría de los marcos principales va en contra" } elseif ($fav -ge 3) { " ✔ la mayoría de los marcos principales acompaña" } else { "" }
+    return ("🕒 Marcos principales (4h · 1D · 1S · 1M) frente a tu {0}: {1} a favor · {2} en contra · {3} mixtos{4}`n   {5}`n   Apoyo (corto plazo): {6}" -f $(if ($sg -eq 1) { "largo" } else { "corto" }), $fav, $con, $mix, $hi, ($main -join " · "), ($aux -join " · "))
 }
 function Get-RiskCheck($symR, [int]$sg, [double]$en, [double]$sl, [double]$tp, [double]$mg, [double]$lv) {
     $L = @(); $warn = 0

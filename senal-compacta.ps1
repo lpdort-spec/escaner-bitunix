@@ -5,11 +5,12 @@
 #   DAY TRADING   · horas, se cierra en el día (velas de 1-2 horas)   -> rupturas cripto en 1h
 #   SWING TRADING · días a semanas (velas de 4 h, diarias, semanales) -> rupturas cripto en 4h, acciones/ETFs diarios y avisos de buen momento (marcos de 4h/1d)
 
-function Get-OrderStyle($tf) {
-    $t = "$tf".ToLower()
-    if ($t -in '1m', '3m', '5m', '15m', '30m') { return @{ name = 'SCALPING'; banner = "🟥🟥🟥 SCALPING 🟥🟥🟥 (minutos)" } }
-    if ($t -in '1h', '2h') { return @{ name = 'DAY TRADING'; banner = "🟧🟧🟧 DAY TRADING 🟧🟧🟧 (horas)" } }
-    return @{ name = 'SWING TRADING'; banner = "🟦🟦🟦 SWING TRADING 🟦🟦🟦 (días)" }
+function Get-OrderStyle($tf) {      # estilo según el marco de la señal; el banner indica SIEMPRE la temporalidad (grupo privado y Alertas Mercados)
+    $t = "$tf".ToLower(); $isMonth = ("$tf" -ceq '1M')
+    $tl = if ($isMonth) { '1M' } elseif ($t -eq '1w') { '1S' } else { "$tf".ToUpper() }
+    if (-not $isMonth -and $t -in '1m', '3m', '5m', '15m', '30m') { return @{ name = 'SCALPING'; banner = "🟥🟥🟥 SCALPING 🟥🟥🟥 (minutos · velas de $tl)" } }
+    if ($t -in '1h', '2h') { return @{ name = 'DAY TRADING'; banner = "🟧🟧🟧 DAY TRADING 🟧🟧🟧 (horas · velas de $tl)" } }
+    return @{ name = 'SWING TRADING'; banner = "🟦🟦🟦 SWING TRADING 🟦🟦🟦 (días o semanas · velas de $tl)" }
 }
 function Get-LevCap($kind) { if ($kind -eq 'cripto') { return 20 } else { return 5 } }
 # Presupuesto de pérdida al saltar el SL (% del margen): el 20% (Get-SlMaxPct) solo cuando la lectura es muy clara; si es más dudosa, o el movimiento está estirado, o el SL es muy amplio,

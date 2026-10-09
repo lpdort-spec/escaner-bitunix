@@ -151,7 +151,9 @@ function Watch-TakenOrders {
                     $dSl = $sg * ($px - $slEff) / $R
                     if ($stage -eq 0 -and $dSl -lt 0.3 -and $tok -notlike '*N*') { $tok += "N"; $msgs += ("⚠️ CERCA DEL STOP · {0}`nEl precio ({1}) está a solo {2:N2}R de tu SL ({3}). Si el motivo de entrada ya no se cumple, valora cerrar antes y limitar la pérdida." -f $head, (TaFp $px), $dSl, (TaFp $slEff)) }
                     # 4) relectura del activo cada 30 min
-                    if (($nowS - [long]$s.chkAt) -ge 1800) {
+                    # una operación de 4h/diario (swing) no se "anula" a los pocos minutos: la relectura solo avisa pasadas 2 velas del marco (4h: 8 h; diario: 24 h), igual que las señales del bot
+                    $minAgeRe = if ($s.tf -eq '1d') { 86400 } elseif ($s.tf -eq '1h') { 10800 } else { 28800 }
+                    if (($nowS - [long]$s.chkAt) -ge 1800 -and ($nowS - [long]$s.time) -ge $minAgeRe) {
                         $s.chkAt = $nowS; $sc = Get-LiveScores $s $px
                         if ($sc) {
                             $me = if ($sg -eq 1) { $sc.lg } else { $sc.st }; $opp = if ($sg -eq 1) { $sc.st } else { $sc.lg }; $neg = @($me.fx | Where-Object { $_ -like '⚠️*' } | Select-Object -First 3)
