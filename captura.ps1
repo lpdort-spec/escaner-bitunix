@@ -209,7 +209,10 @@ function Split-PositionBlocks([string]$path) {      # si la captura trae varias 
     try {
         $rows = Get-ImageOcrRows $path 2 $true; if (-not $rows) { return @() }
         $heads = @($rows | Where-Object { $_.x -lt 200 -and $_.t -cmatch '(?<![A-Za-z0-9])[A-Z][A-Z0-9]{1,11}USDT\b' } | Sort-Object y)      # el icono de la moneda a veces se lee como "@" u "O" delante del símbolo
+        $ents = @($rows | Where-Object { $_.t -match '(?i)precio de entrada|precio de$' } | Sort-Object y)      # una posición real tiene su fila "Precio de entrada" debajo de la cabecera
         $ys = @(); foreach ($h in $heads) { if (-not $ys.Count -or ($h.y - $ys[-1]) -gt 120) { $ys += [int]$h.y } }
+        $ys2 = @(); for ($i = 0; $i -lt $ys.Count; $i++) { $nxt = if ($i + 1 -lt $ys.Count) { $ys[$i + 1] } else { [int]::MaxValue }; if (@($ents | Where-Object { $_.y -gt $ys[$i] -and $_.y -lt $nxt }).Count) { $ys2 += $ys[$i] } }
+        $ys = $ys2
         if ($ys.Count -lt 2) { return @() }
         $outs = @(); for ($i = 0; $i -lt $ys.Count; $i++) {
             $top = [Math]::Max(0, $ys[$i] - 28); $bot = if ($i + 1 -lt $ys.Count) { [Math]::Max($top + 40, $ys[$i + 1] - 10) } else { $img.Height }; if ($bot -gt $img.Height) { $bot = $img.Height }
