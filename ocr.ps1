@@ -30,6 +30,7 @@ function Get-ImageOcrRows([string]$path, [double]$Scale = 3, [bool]$Invert = $tr
         $eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
         if (-not $eng) { $eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage([Windows.Globalization.Language]::new('en-US')) }
         if (-not $eng) { return $null }
+        try { Add-Type -AssemblyName System.Drawing; $im0 = [System.Drawing.Image]::FromFile((Resolve-Path $path).Path); $mxDim = [Math]::Max($im0.Width, $im0.Height); $im0.Dispose(); if ($mxDim * $Scale -gt 9000) { $Scale = 9000.0 / $mxDim } } catch {}      # el motor de Windows rechaza imágenes de más de ~10.000 px: se limita la ampliación (una captura de 2.000 px con x6 daba error)
         $tmp = $null; try { $tmp = Convert-ImageForOcr $path $Scale $Invert } catch { $tmp = (Resolve-Path $path).Path; $Scale = 1.0 }      # formatos que System.Drawing no abre (p. ej. WebP): se lee tal cual con el decodificador de Windows
         $file = Wait-WinRt ([Windows.Storage.StorageFile]::GetFileFromPathAsync($tmp)) ([Windows.Storage.StorageFile])
         $stream = Wait-WinRt ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])

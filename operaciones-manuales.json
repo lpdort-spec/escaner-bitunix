@@ -32,7 +32,7 @@
   {
     "id": "manual-btc-20261009-corto",
     "sym": "BTC", "side": -1, "entry": 83161.6, "sl": 83587.6, "tp": 81883.6,
-    "margin": 160.189, "lev": 40, "qty": 0.0752,
-    "note": "Operación real de Luis en Bitunix (captura 2026-10-09): BTCUSDT CORTO x40, aislado, margen 160,19. SIN SL NI TP en el exchange al registrarla (liquidación 85.020,9 = 2,2% sobre la entrada). SL y TP propuestos por el bot: SL = 20% del margen (≈32 USDT, +0,51% = 83.587,6); TP final 3R = 81.883,6 (TP parcial 82.735,6; TP2 82.309,5). Solo seguimiento: los pone Luis en el exchange."
+    "margin": 160.189, "lev": 40, "qty": 0.0752, "exit": 83693.8, "pnlReal": -105.4895, "closedAt": 1791712616, "outcome": "cierre manual",
+    "note": "Operación real de Luis en Bitunix (captura 2026-10-09; cierre real 2026-10-11 17:56 hora plataforma a 83.693,8: -105,49 USDT con 0,17 BTC tras ampliar): BTCUSDT CORTO x40, aislado, margen 160,19. SIN SL NI TP en el exchange al registrarla (liquidación 85.020,9 = 2,2% sobre la entrada). SL y TP propuestos por el bot: SL = 20% del margen (≈32 USDT, +0,51% = 83.587,6); TP final 3R = 81.883,6 (TP parcial 82.735,6; TP2 82.309,5). Solo seguimiento: los pone Luis en el exchange."
   }
 ]

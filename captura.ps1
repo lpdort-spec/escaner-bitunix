@@ -38,15 +38,20 @@ function Read-PositionScreenshot([string]$path, [string]$captionSym) {      # va
     $merged = $null
     foreach ($cfg in @(@(3, $true), @(4, $true), @(6, $true), @(2, $true), @(4, $false))) {
         $q = Read-PositionOnce $path $captionSym $cfg[0] $cfg[1]
-        if ($q.error) { if (-not $merged) { $merged = $q }; if ($q.error -like '*no está disponible*') { return $q }; continue }
+        if ($q.error) { if (-not $merged) { $merged = $q }; if ($q.error -like '*no está disponible*') { if ($merged.error) { return $q } else { break } }; continue }      # un fallo en una pasada posterior no debe tirar lo ya leído
         if (-not $merged -or $merged.error) { $merged = $q } else { foreach ($k in @($q.Keys)) { if ($k -eq 'notes') { $merged.notes = @($merged.notes) + @($q.notes) | Select-Object -Unique } elseif (-not $merged.ContainsKey($k) -or $null -eq $merged[$k]) { $merged[$k] = $q[$k] } } }
         if ($merged.sym -and $merged.entry -and $merged.side -and $merged.margin -and ($merged.levels -or $merged.sl) -and ($merged.levLabel -or $merged.qty)) { break }
     }
     # apalancamiento definitivo tras juntar las pasadas: etiqueta "7X" > cantidad x ENTRADA / margen > nocional marcado / margen (el nocional a precio marcado da un apalancamiento menor del real cuando el precio se ha movido)
+    if ($merged -and -not $merged.error -and -not $merged.side -and $merged.liq -and $merged.entry) { $merged.side = $(if ($merged.liq -gt $merged.entry) { -1 } else { 1 }); $merged.notes = @($merged.notes) + @("lado deducido de la liquidación (por encima de la entrada = corto)") }
+    if ($merged -and -not $merged.error -and -not $merged.side -and $merged.mark -and $merged.entry -and $merged.mark -ne $merged.entry -and $null -ne $merged.pnlNeg -and $merged.pnl) { $up2 = ($merged.mark -gt $merged.entry); $merged.side = $(if (($up2 -and -not $merged.pnlNeg) -or (-not $up2 -and $merged.pnlNeg)) { 1 } else { -1 }); $merged.notes = @($merged.notes) + @("lado deducido del signo del PYG frente al precio marcado") }
     if ($merged -and -not $merged.error) { $lvF = $null
         if ($merged.levLabel) { $lvF = [double]$merged.levLabel }
-        elseif ($merged.qty -and $merged.entry -and $merged.margin -and $merged.margin -gt 0) { $z = $merged.qty * $merged.entry / $merged.margin; if ([Math]::Abs($z - [Math]::Round($z)) -lt 0.3 -and $z -ge 1 -and $z -le 150) { $lvF = [Math]::Round($z) } }
-        if ($lvF) { $merged.lev = $lvF } }
+        elseif ($merged.qty -and $merged.entry -and $merged.margin -and $merged.margin -gt 0) { $z = $merged.qty * $merged.entry / $merged.margin
+            $std = @(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 25, 30, 35, 40, 45, 50, 60, 75, 100, 125, 150); $near = $std | Sort-Object { [Math]::Abs($_ - $z) } | Select-Object -First 1      # la cantidad se redondea y da 39,0 en vez de 40: se ajusta al apalancamiento habitual más cercano (3%)
+            if ($z -ge 1 -and $z -le 150 -and [Math]::Abs($z - $near) / $near -lt 0.03) { $lvF = $near } }
+        if ($lvF) { $merged.lev = $lvF; $merged.notes = @($merged.notes | Where-Object { $_ -notlike 'apalancamiento deducido del nocional*' }) }
+        if ($merged.sym) { $merged.notes = @($merged.notes | Where-Object { $_ -ne 'no encuentro el símbolo' -and $_ -notlike 'no reconozco con seguridad el símbolo*' }) } }      # avisos de pasadas anteriores que ya se resolvieron
     if ($merged -and -not $merged.error -and $merged.entry -and $merged.side -and $merged.levels -and -not ($merged.sl -or $merged.tp)) {
         if (@($merged.levels).Count -eq 2) { $merged.tp = [double]$merged.levels[0]; $merged.sl = [double]$merged.levels[1] }      # Bitunix muestra "TP/SL": con dos precios el primero es el TP y el segundo el SL (el SL puede estar ya en beneficio)
         else { foreach ($n in $merged.levels) { if ($merged.side * ($n - $merged.entry) -gt 0) { $merged.tp = $n } else { $merged.sl = $n } } } }
@@ -64,12 +69,17 @@ function Read-PositionOnce([string]$path, [string]$captionSym, [double]$sc0, [bo
     $modeRow = @($rows | Where-Object { $_.y -lt 110 -and $_.t -match '(?i)\b(cruzad[ao]|aislad[ao]|cross|isolated)\b' } | Select-Object -First 1)[0]
     if ($modeRow) { $p.mode = $(if ($modeRow.t -match '(?i)cruzad|cross') { 'cruzada' } else { 'aislada' }) }
     # símbolo
-    $symRow =@($rows | Where-Object { $_.y -lt 110 -and $_.t -match '(?i)[A-Z0-9]{2,12}\s*USDT' } | Select-Object -First 1)[0]
+    $symRow =@($rows | Where-Object { $_.y -lt 110 -and $_.t -match '(?i)(?<![0-9.,A-Za-z])[A-Z][A-Z0-9]{1,11}\s*USDT' } | Select-Object -First 1)[0]      # el símbolo empieza por letra: así no se confunde con importes como "-0.68432 USDT"
     $tick = @((Invoke-RestMethod "$($script:CmdBase)/tickers" -TimeoutSec 20).data)
     $bases = @($tick | ForEach-Object { $_.symbol -replace 'USDT$', '' })
     if ($captionSym) { $p.sym = ($captionSym.ToUpper() -replace 'USDT$', '') }
-    elseif ($symRow -and $symRow.t -match '(?i)([A-Z0-9]{2,12})\s*USDT') { $r = Resolve-OcrSymbol $Matches[1] $bases; if ($r.ok) { $p.sym = $r.sym } else { $p.notes += "no reconozco con seguridad el símbolo (leído '$($Matches[1])')" } }
-    else { $p.notes += "no encuentro el símbolo" }
+    elseif ($symRow -and $symRow.t -match '(?i)(?<![0-9.,A-Za-z])([A-Z][A-Z0-9]{1,11})\s*USDT') { $r = Resolve-OcrSymbol $Matches[1] $bases; if ($r.ok) { $p.sym = $r.sym } else { $p.notes += "no reconozco con seguridad el símbolo (leído '$($Matches[1])')" } }
+    if (-not $p.sym -and -not $captionSym) {      # cabecera mal leída (ej. "O BTCUSC6FtoAisladé0X"): se busca una moneda de Bitunix al principio de la primera fila seguida de "US"
+        $hdrRows = @($rows | Where-Object { $_.y -lt 60 -and $_.x -lt 400 } | Sort-Object y, x | Select-Object -First 2)
+        foreach ($hr in $hdrRows) { $hc = Get-OcrCanon ($hr.t -replace '[^A-Za-z0-9]', ''); $best = $null
+            foreach ($b0 in ($bases | Sort-Object { $_.Length } -Descending)) { $bc = Get-OcrCanon $b0; if ($bc.Length -ge 2 -and $hc -match ('^[A-Z0-9]{0,2}' + [regex]::Escape($bc) + 'US')) { $best = $b0; break } }
+            if ($best) { $p.sym = $best; $p.notes = @($p.notes | Where-Object { $_ -notlike 'no reconozco*' -and $_ -ne 'no encuentro el símbolo' }); $p.notes += "símbolo deducido de una cabecera mal leída"; break } }
+        if (-not $p.sym -and -not (@($p.notes) -like 'no reconozco*')) { $p.notes += "no encuentro el símbolo" } }
     if ($p.sym -and $p.sym -notin $bases) { $p.notes += "$($p.sym) no existe en Bitunix"; $p.sym = $null }
     $live = $null; if ($p.sym) { $live = [double]($tick | Where-Object symbol -eq "$($p.sym)USDT" | Select-Object -First 1).lastPrice; $p.live = $live }
     $near = { param($v) $v -and $live -gt 0 -and [Math]::Abs($v / $live - 1) -lt 0.35 }
@@ -106,6 +116,8 @@ function Read-PositionOnce([string]$path, [string]$captionSym, [double]$sc0, [bo
         elseif ($p.levels -and @($p.levels).Count -ge 2) { $p.side = $(if ($p.levels[0] -gt $p.levels[1]) { 1 } else { -1 }); $p.notes += "lado deducido del orden TP/SL" }
     }
     # apalancamiento = nocional / margen (debe salir casi entero)
+    if (-not $p.side -and $p.liq -and $p.entry) { $p.side = $(if ($p.liq -gt $p.entry) { -1 } else { 1 }); $p.notes += "lado deducido de la liquidación (por encima de la entrada = corto)" }      # respaldo si no se lee el texto Largo/Corto
+    if (-not $p.side -and $p.mark -and $p.entry -and $p.mark -ne $p.entry -and $null -ne $p.pnlNeg -and $p.pnl) { $up = ($p.mark -gt $p.entry); $p.side = $(if (($up -and -not $p.pnlNeg) -or (-not $up -and $p.pnlNeg)) { 1 } else { -1 }); $p.notes += "lado deducido del signo del PYG frente al precio marcado" }
     # prioridad: etiqueta "7X" junto al símbolo > cantidad x ENTRADA / margen (el margen se calcula con el precio de entrada, no con el marcado) > nocional a precio marcado / margen
     if ($p.levLabel) { $p.lev = $p.levLabel }
     elseif ($p.qty -and $p.entry -and $p.margin -and $p.margin -gt 0) { $lv = $p.qty * $p.entry / $p.margin; if ([Math]::Abs($lv - [Math]::Round($lv)) -lt 0.3 -and $lv -ge 1 -and $lv -le 150) { $p.lev = [Math]::Round($lv) } }
