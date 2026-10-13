@@ -49,6 +49,8 @@ function Get-RiskCheck($symR, [int]$sg, [double]$en, [double]$sl, [double]$tp, [
             if ($own -le -1 -and $opp -ge 3) { $L += ("⚠️ La lectura del activo va EN CONTRA de tu operación: puntúa {0} para tu dirección y {1} para la contraria." -f $own, $opp); $warn++ }
             elseif ($own -ge 6) { $L += ("✔ La lectura va a tu favor (puntuación {0})." -f $own) }
             else { $L += ("· Lectura neutra para tu dirección (puntuación {0}; contraria {1})." -f $own, $opp) }
+            # apalancamiento máximo razonable: con el SL a 1,5 ATR(4h) del precio, tu regla (SL <= 20% del margen) permite como máximo x(20 / % del SL). Tus pérdidas más grandes del diario (BTC x40 -29,9%, STRK -22,8%) superaron el 20%.
+            if ($a4.atr -gt 0 -and $px -gt 0) { $slAtrPct = 1.5 * [double]$a4.atr / $px * 100; $levCap = [Math]::Max(1, [Math]::Floor($mx / $slAtrPct)); $L += ("📐 Con un SL a 1,5 ATR de 4h ({0:N2}% del precio) tu regla del {1:N0}% permite como máximo x{2}; usas x{3:N0}{4}" -f $slAtrPct, $mx, $levCap, $lv, $(if ($lv -gt $levCap) { " ⚠️ ({0:N1} veces más: un movimiento normal de ruido ya supera tu pérdida máxima)" -f ($lv / $levCap) } else { " ✔" })); if ($lv -gt 1.5 * $levCap) { $warn++ } }
             $rsi = [double]$a4.m.rsi
             if ($sg -eq -1 -and $rsi -ge 80) { $L += ("⚠️ RSI 4h {0:N0}: shortear una subida vertical es lo que más veces te ha barrido (MOVR 01/10: -520 USDT). Mejor esperar un cierre de confirmación a la baja." -f $rsi); $warn++ }
             if ($sg -eq 1 -and $rsi -le 20) { $L += ("⚠️ RSI 4h {0:N0}: comprar una caída libre suele ser barrido; espera una vela de confirmación al alza." -f $rsi); $warn++ }

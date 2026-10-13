@@ -50,8 +50,9 @@ function Score-Momento([int]$sg, $a4, $a1, $tvR, [double]$px, $sentVal, $fund) {
             elseif (($sg -eq 1 -and $t4 -le -0.1 -and $t1 -le -0.1) -or ($sg -eq -1 -and $t4 -ge 0.1 -and $t1 -ge 0.1)) { & $add -1 "TradingView (4h y 1d) en contra" }
             else { & $add 0 "TradingView dividido entre 4h y 1d" } } }
     # sentimiento y funding
-    if ($null -ne $sentVal) { if ($sg -eq 1 -and $sentVal -ge 75) { & $add -1 ("Sentimiento de euforia extrema ({0:N0}/100): los largos tardíos son vulnerables" -f $sentVal) } elseif ($sg -eq -1 -and $sentVal -le 25) { & $add -1 ("Sentimiento de pánico extremo ({0:N0}/100): riesgo de rebote contra el corto" -f $sentVal) } }
-    if ($null -ne $fund) { if ($sg -eq 1 -and $fund -ge 0.03) { & $add -1 ("Funding alto ({0:N3}%): largos saturados" -f $fund) } elseif ($sg -eq -1 -and $fund -le -0.03) { & $add -1 ("Funding muy negativo ({0:N3}%): cortos saturados" -f $fund) } }
+    # Sentimiento y funding: solo CONTEXTO (0 puntos). Estudio bt-nuevas-ideas (13/10/2026, 150 futuros, ~1000 días): los largos con codicia extrema dieron +0,18R (n=671) y con funding en su percentil alto +0,14R (n=1031); los cortos con funding alto -0,10R. La hipótesis "largos masificados = evitar" NO se sostiene (la euforia suele ser momentum), así que ya no restan puntos.
+    if ($null -ne $sentVal) { if ($sg -eq 1 -and $sentVal -ge 75) { & $add 0 ("Sentimiento de euforia extrema ({0:N0}/100): contexto, sin ventaja medida en contra de los largos" -f $sentVal) } elseif ($sg -eq -1 -and $sentVal -le 25) { & $add 0 ("Sentimiento de pánico extremo ({0:N0}/100): contexto, sin ventaja medida en contra de los cortos" -f $sentVal) } }
+    if ($null -ne $fund) { if ($sg -eq 1 -and $fund -ge 0.03) { & $add 0 ("Funding alto ({0:N3}%): contexto, sin ventaja medida en contra de los largos" -f $fund) } elseif ($sg -eq -1 -and $fund -le -0.03) { & $add 0 ("Funding muy negativo ({0:N3}%): contexto, sin ventaja medida en contra de los cortos" -f $fund) } }
     # plan orientativo y espacio hasta el obstáculo
     $plan = $null
     if ($a4) {
