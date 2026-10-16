@@ -34,6 +34,7 @@ jobs:
           git config user.name "escaner"
           git config user.email "escaner@users.noreply.github.com"
           for f in seen.json signals.jsonl last-report.txt bot-offset.txt; do [ -f "$f" ] && git add "$f"; done
+          if [ -d datos ]; then git add datos; fi       # recolector horario de posicionamiento (datos/posicionamiento-AAAAMM.csv)
           git diff --cached --quiet || (git commit -m "estado" && git pull --rebase -q && git push)
       - name: Relevo inmediato si hay código nuevo
         if: always()
