@@ -190,12 +190,12 @@ function Get-CompactSummary {
     $now = Get-MadridNow; $all = @(Read-Signals); $since = [DateTimeOffset]::UtcNow.AddHours(-24).ToUnixTimeSeconds()
     $mineOpen = @($all | Where-Object { ($_.strat -eq 'tomada' -or $_.manual -eq $true) -and $_.status -in 'open', 'pending' })
     $mineOpen = @($mineOpen | Group-Object sym | ForEach-Object { $_.Group | Sort-Object { if ($_.strat -eq 'tomada') { 0 } else { 1 } } | Select-Object -First 1 })      # una línea por moneda (si hay registro vivo y manual, el vivo)
-    $mineClosed = @($all | Where-Object { ($_.strat -eq 'tomada' -or $_.manual -eq $true) -and $_.status -eq 'closed' -and $_.closedAt -and [long]$_.closedAt -ge $since -and "$($_.outcome)" -notlike 'sustituida*' } | Group-Object sym | ForEach-Object { $_.Group | Select-Object -First 1 })
-    $trk = @($all | Where-Object { $_.strat -in 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'seg-priv' -and $_.manual -ne $true -and ($_.status -in 'open', 'pending' -or ($_.status -eq 'closed' -and $_.closedAt -and [long]$_.closedAt -ge $since)) } | Sort-Object { [long]$_.time } -Descending)
+    $mineClosed = @()      # desde 16/10/2026 el resumen NO informa de operaciones cerradas (petición de Luis): solo las que siguen en marcha
+    $trk = @($all | Where-Object { $_.strat -in 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'seg-priv' -and $_.manual -ne $true -and $_.status -in 'open', 'pending' } | Sort-Object { [long]$_.time } -Descending)
     $px = Get-LivePxMap (@($mineOpen) + @($trk | Where-Object { $_.status -eq 'open' }))
     $L = @(("📊 RESUMEN · {0:dd/MM HH:mm} (hora de España)" -f $now), "")
     $L += "👤 TUS OPERACIONES"
-    if (-not $mineOpen.Count -and -not $mineClosed.Count) { $L += "   Sin operaciones abiertas ni cerradas en las últimas 24 h." }
+    if (-not $mineOpen.Count) { $L += "   Ninguna operación en marcha." }
     foreach ($r in ($mineOpen | Select-Object -First 10)) { $L += ("   " + (Format-SummaryLine $r $px["$($r.sym)"] $true)) }
     foreach ($r in ($mineClosed | Select-Object -First 8)) { $L += ("   " + (Format-SummaryLine $r $null $true)) }
     $L += ""

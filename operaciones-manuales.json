@@ -1,4 +1,4 @@
-﻿[
+[
   {
     "id": "manual-eth-20261003",
     "sym": "ETH", "side": 1, "entry": 2664.24, "sl": 2638, "tp": 2723,
@@ -40,5 +40,17 @@
     "sym": "BTC", "side": -1, "entry": 83398.9, "sl": 84750, "tp": 77000,
     "margin": 387.631, "lev": 30, "qty": 0.1366,
     "note": "Operación real de Luis en Bitunix (captura 2026-10-13): BTCUSDT CORTO x30, aislado, margen 387,63 (posición 11.386,8 USDT), liquidación 85.964,9. SL 84.750 (+1,62%: pierde ≈184,6 USDT = 47,6% del margen, por encima de la regla del 20%) y TP 77.000 (-7,67%: +874 USDT; R:B 4,7:1) puestos por Luis en el exchange."
+  },
+  {
+    "id": "manual-btc-20261016-largo-x125",
+    "sym": "BTC", "side": 1, "entry": 81966.7, "sl": 81600, "tp": 83000,
+    "margin": 15.2967, "lev": 125, "qty": 0.0217, "exit": 82404.9, "pnlReal": 8.2591, "closedAt": 1792139039, "outcome": "cierre manual",
+    "note": "Operación real de Luis en Bitunix (captura 2026-10-16): BTCUSDT LARGO x125, aislado, margen 15,30 (posición 1.786,9 USDT), liquidación 81.528,1 (-0,53% de la entrada). SL 81.600 (-0,45%: pierde ≈ 7,96 USDT = 52% del margen) y TP 83.000 (+1,26%: +22,4 USDT; R:B 2,8:1) puestos por Luis en el exchange. A x125 las comisiones de ida y vuelta cuestan ≈ 17% del margen."
+  },
+  {
+    "id": "manual-rats-20261016-largo-x5",
+    "sym": "1000RATS", "side": 1, "entry": 0.01576, "sl": 0.01670, "tp": 0.03300,
+    "margin": 286.2464, "lev": 5, "qty": 90628,
+    "note": "Operación real de Luis en Bitunix (captura 2026-10-16): 1000RATSUSDT LARGO x5, aislado, margen 286,25 (>200; posición 1.636,7 USDT), liquidación 0,01277. SL 0,01670 (por ENCIMA de la entrada: asegura ≈ +85 USDT) y TP 0,03300 (+109%: casi recupera el nivel previo al desplome del 13/10) puestos por Luis en el exchange."
   }
 ]

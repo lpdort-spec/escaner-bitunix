@@ -27,16 +27,23 @@ function Add-SignalRecord($rec) {
 
 function Update-Signals($base) {
     $sigs = Read-Signals; if ($sigs.Count -eq 0) { return }
-    $changed = $false
+    $changed = $false; $kcache = @{}
     foreach ($s in $sigs) {
         if ($s.status -in 'closed', 'unfilled' -or $s.strat -eq 'tomada') { continue }      # las órdenes tomadas por el usuario se vigilan en vivo (senal-tomada.ps1)
         if ($s.src -eq "yahoo") {      # acciones/ETFs: velas diarias cerradas de Yahoo Finance (la etiqueta de cada vela es el inicio de su sesión)
             if (-not (Get-Command Get-MktClosedForTracker -ErrorAction SilentlyContinue)) { continue }
             $closed = @(Get-MktClosedForTracker $s.sym); if ($closed.Count -eq 0) { continue }
         } else {
-            try {
-                $k = (Invoke-RestMethod "$base/kline?symbol=$($s.sym)&interval=$($s.tf)&limit=200").data | Sort-Object { [long]$_.time }
-            } catch { continue }
+            # velas por (moneda, marco) con caché dentro de la pasada: antes se pedían una vez por registro (casi 300 peticiones por vuelta)
+            $ck = "$($s.sym)|$($s.tf)"
+            if (-not $kcache.ContainsKey($ck)) { $kk = $null; try { $kk = @((Invoke-RestMethod "$base/kline?symbol=$($s.sym)&interval=$($s.tf)&limit=200" -TimeoutSec 25).data | Sort-Object { [long]$_.time }) } catch {}; $kcache[$ck] = $kk }
+            $k = $kcache[$ck]
+            # sin velas utilizables (moneda inexistente, deslistada o recién listada): ANTES esta línea lanzaba un error y abortaba el seguimiento de TODOS los registros (desde el 09/10 no se resolvía ninguna señal)
+            if ($null -eq $k -or @($k).Count -lt 3) {
+                $edad = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - [long]$s.time
+                if ($edad -gt 259200 -and $s.manual -ne $true) { if ($s.status -eq 'pending') { $s.status = 'unfilled'; $s.note = 'sin datos de mercado' } else { $s.status = 'closed'; $s.outcome = 'sin datos de mercado'; $s.closedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds() }; $changed = $true }
+                continue
+            }
             $closed = @($k[0..($k.Count - 2)])
         }
         $sgn = [int]$s.side

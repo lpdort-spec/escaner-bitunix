@@ -10,7 +10,7 @@ param(
     [double]$MaxAgeFactor = 1.5,    # solo avisa si la vela cerró hace <= X veces su duración
     [string[]]$Strategies = @("ruptura"),
     [double]$MinSlPct = 1.0,        # SL mínimo en % del precio (las comisiones se comen los SL pequeños)
-    [double]$MinRoiTp2 = 25,        # ganancia mínima en TP2 sobre el margen (%) con el apalancamiento recomendado
+    [double]$MinRoiTp2 = 10,        # ganancia mínima en TP2 sobre el margen (%) con el apalancamiento recomendado. Era 25 hasta el 16/10/2026: con la pérdida máxima del 20% del margen y los topes de apalancamiento ningún candidato la alcanzaba (41 rupturas de calidad en una semana, 0 señales; ROI en TP2 de esos casos: mediana 6,6%, máximo 18%)
     [double]$MaxFeeShare = 20,      # descarta si las comisiones superan este % de la ganancia en TP1
     [double]$FeeRT = 0.10,          # comisiones + deslizamiento de ida y vuelta (% del nominal, órdenes limit)
     [int]$EverySeconds = 120,
@@ -48,6 +48,7 @@ if (Test-Path (Join-Path $PSScriptRoot "expansion-obs.ps1")) { . (Join-Path $PSS
 if (Test-Path (Join-Path $PSScriptRoot "bollinger-obs.ps1")) { . (Join-Path $PSScriptRoot "bollinger-obs.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "mesa-ballenas.ps1")) { . (Join-Path $PSScriptRoot "mesa-ballenas.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "tendencia-obs.ps1")) { . (Join-Path $PSScriptRoot "tendencia-obs.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "datos-mercado.ps1")) { . (Join-Path $PSScriptRoot "datos-mercado.ps1") }
 $TelegramSignalChatId = $env:TELEGRAM_SIGNAL_CHAT_ID
 if (-not $TelegramSignalChatId -and (Test-Path $cfg)) { try { $TelegramSignalChatId = (Get-Content $cfg -Raw | ConvertFrom-Json).signalChatId } catch {} }
 # destinos de las señales: el secreto del chat privado; si no está configurado, SOLO chats privados (id positivo), nunca grupos (id negativo)
@@ -355,9 +356,13 @@ function Scan($iv) {
             # --- Señal COMPACTA (la misma para el chat privado de Bitunix y para Alertas Mercados): puntuación, entrada, apalancamiento, SL y TP. El detalle se pide con /informe o /momento. ---
             $scSig = Get-SignalScore $name 'cripto' $sgn ([double]$entry)
             $slNote = $null; try { if (Get-Command Get-SlClusterNote -ErrorAction SilentlyContinue) { $slNote = Get-SlClusterNote $sgn $name $entry $sl $atr ([double]$entry) } } catch {}      # solo advertencia: el SL de las rupturas está validado en backtest y no se modifica
-            $msg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto' $iv $slNote
+            $roiNote = if ($roi2 -lt 25) { ("ROI esperado en TP2 ≈ {0:N0}% del margen con x{1}: es bajo porque tu regla limita la pérdida al 20% del margen y el apalancamiento se acota por volatilidad. La ventaja de la táctica está en el R (1R/2R/3R), no en el ROI." -f $roi2, $lev) } else { $null }
+            $mgmtNote = "Gestión: margen aislado (máx. 200 USDT), SL puesto en Bitunix, un tercio en cada TP y SL a la entrada tras el TP1."      # solo para tu chat privado
+            $msg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto' $iv @($slNote, $roiNote, $mgmtNote)
             $genMsg = $null
-            if ($iv -eq "4h" -and $strat -eq "ruptura" -and $script:MktChat) { $genMsg = $msg }
+            if ($iv -eq "4h" -and $strat -eq "ruptura" -and $script:MktChat) {      # grupo Alertas Mercados: misma señal sin instrucciones personales ni mención a otros chats
+                $roiNoteG = if ($roi2 -lt 25) { ("ROI esperado en TP2 ≈ {0:N0}% del margen con x{1}: es bajo porque el apalancamiento recomendado limita la pérdida del SL al 20% del margen. La ventaja de la táctica está en el R (1R/2R/3R), no en el ROI." -f $roi2, $lev) } else { $null }
+                $genMsg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto' $iv @($slNote, $roiNoteG) }
             $photo = $null
             if (Send-Alert $key $msg $photo) {
                 if ($genMsg -and $TelegramToken) { try { Send-Tg $TelegramToken $script:MktChat $genMsg $null } catch {} }
@@ -492,6 +497,7 @@ do {
     try { Run-Expansion4hObsIfDue } catch {}
     try { Run-BollingerBajoObsIfDue } catch {}
     try { Run-TendenciaObsIfDue } catch {}
+    try { if (Get-Command Run-DatosMercadoIfDue -ErrorAction SilentlyContinue) { Run-DatosMercadoIfDue } } catch {}      # recolector horario de posicionamiento (solo para medir)
     try { Notify-GroupTracking } catch {}
     try { Check-SignalHealth } catch {}
     try { Send-MacroRemindersIfDue } catch {}

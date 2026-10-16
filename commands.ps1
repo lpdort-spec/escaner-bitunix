@@ -285,8 +285,11 @@ function Close-ManualFromArgs($ra) {
     $symR = (($ra[0] -replace '[^A-Za-z0-9]', '').ToUpper()) -replace 'USDT$', ''
     $dv = 0.0; if (-not [double]::TryParse((($ra[1] -replace ',', '.') -replace '[^0-9.]', ''), [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$dv) -or $dv -le 0) { return "No entiendo el precio '$($ra[1])'.`n$uso" }
     $r = Close-ManualTrade $symR $dv
-    if (-not $r) { return "No hay ninguna operación manual abierta de ${symR}USDT en el seguimiento." }
-    return ("✅ Cerrada {0}: salida {1} · resultado {2:+0.00;-0.00} USDT ({3:+0.0;-0.0}% del margen, comisiones estimadas al 0,10%) · {4:+0.00;-0.00}R." -f $symR, (Fpx $dv), [double]$r.pnlUsd, ([double]$r.pnlUsd / [double]$r.margin * 100), [double]$r.net)
+    # también se cierra la vigilancia EN VIVO (registro 'tomada') de esa moneda: una operación cerrada no genera más avisos
+    $nTom = 0; try { if (Get-Command Close-TomadaRecord -ErrorAction SilentlyContinue) { $all2 = @(Read-Signals); foreach ($x in $all2) { if ($x.strat -eq 'tomada' -and $x.status -eq 'open' -and $x.sym -eq "${symR}USDT") { $mm = [int]$x.side * ($dv - [double]$x.entry) / [double]$x.riskAbs; $rr = [double]$x.realized + $mm * $(switch ([int]$x.stage) { 0 { 1.0 } 1 { 2.0 / 3 } default { 1.0 / 3 } }); Close-TomadaRecord $x $dv 'cierre manual' $rr; $nTom++ } }; if ($nTom) { Save-Signals $all2 } } } catch {}
+    if (-not $r -and -not $nTom) { return "No hay ninguna operación abierta de ${symR}USDT en el seguimiento." }
+    if (-not $r) { return ("✅ Cerrada {0} a {1}. Dejo de vigilarla: no recibirás más avisos de esta operación." -f $symR, (Fpx $dv)) }
+    return ("✅ Cerrada {0}: salida {1} · resultado {2:+0.00;-0.00} USDT ({3:+0.0;-0.0}% del margen, comisiones estimadas al 0,10%) · {4:+0.00;-0.00}R. Dejo de vigilarla: no recibirás más avisos de esta operación." -f $symR, (Fpx $dv), [double]$r.pnlUsd, ([double]$r.pnlUsd / [double]$r.margin * 100), [double]$r.net)
 }
 
 function Handle-Commands($token, $allowedChats, $offsetFile) {
@@ -416,6 +419,7 @@ if (Test-Path (Join-Path $PSScriptRoot "traders.ps1")) { . (Join-Path $PSScriptR
 if (Test-Path (Join-Path $PSScriptRoot "opinion.ps1")) { . (Join-Path $PSScriptRoot "opinion.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-compacta.ps1")) { . (Join-Path $PSScriptRoot "senal-compacta.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "macro-calendario.ps1")) { . (Join-Path $PSScriptRoot "macro-calendario.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "control-riesgo.ps1")) { . (Join-Path $PSScriptRoot "control-riesgo.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-tomada.ps1")) { . (Join-Path $PSScriptRoot "senal-tomada.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "ocr.ps1")) { . (Join-Path $PSScriptRoot "ocr.ps1") }

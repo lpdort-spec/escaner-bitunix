@@ -38,6 +38,8 @@ function Get-RiskCheck($symR, [int]$sg, [double]$en, [double]$sl, [double]$tp, [
     $liq = 100.0 / $lv - 0.3; if (-not $inProfit -and $slPct -ge 0.8 * $liq) { $L += ("⚠️ El SL queda muy cerca de la liquidación (≈ a {0:N1}% del precio): un pico puede liquidarte antes de que actúe el stop." -f $liq); $warn++ }
     # 3) comisiones con apalancamiento alto
     if ($lv -ge 30) { $L += ("⚠️ Con x{0:N0} las comisiones de ida y vuelta (~0,15% del nominal) cuestan ≈ {1:N1}% del margen: si el precio apenas se mueve, pierdes igualmente." -f $lv, (0.15 * $lv)); $warn++ }
+    # 3b) evento macro cercano (decisión de la Fed): solo aviso, no suma al nº de avisos
+    try { if (Get-Command Get-MacroLine -ErrorAction SilentlyContinue) { $ml = Get-MacroLine; if ($ml) { $L += $ml } } } catch {}
     # 4a) todos los marcos temporales: 15m, 1h, 4h, 1d, 1S y 1M frente a la dirección de la operación
     try { $mt = Get-MultiTfLine $sg $symR $cur; if ($mt) { $L += $mt } } catch {}
     # 4) lectura del mercado
@@ -66,6 +68,11 @@ function Get-RiskCheck($symR, [int]$sg, [double]$en, [double]$sl, [double]$tp, [
         $rec = @($cerr | Where-Object { $_.sym -eq "${symR}USDT" -and ($now - [long]$_.closedAt) -le 900 -and $null -ne $_.pnlUsd -and [double]$_.pnlUsd -lt 0 })
         if ($rec.Count) { $L += ("⚠️ Reentrada en {0} menos de 15 minutos después de cerrar con pérdida ({1:N0} USDT): es el patrón que más te ha costado. Respira un minuto y revisa si la entrada cumple las reglas." -f $symR, [double]$rec[0].pnlUsd); $warn++ }
         $perdHoy = @($cerr | Where-Object { [DateTimeOffset]::FromUnixTimeSeconds([long]$_.closedAt).ToOffset((New-TimeSpan -Hours 2)).Date -eq $hoy -and $null -ne $_.pnlUsd -and [double]$_.pnlUsd -lt 0 })
+        # escalada de apalancamiento tras perder (racha de RATS 15/10: x5 -> x9 -> x15 -> x24 en 26 h, -236 USDT) y reentradas en la misma moneda en menos de 60 min
+        $rec6 = @($cerr | Where-Object { ($now - [long]$_.closedAt) -le 21600 -and $null -ne $_.pnlUsd -and [double]$_.pnlUsd -lt 0 -and $_.lev } | Sort-Object { [long]$_.closedAt } -Descending)
+        if ($rec6.Count -and [double]$lv -gt [double]$rec6[0].lev) { $L += ("⚠️ Subes el apalancamiento a x{0:N0} justo después de perder con x{1:N0} en {2} hace {3:N0} min: es el patrón que más ha multiplicado tus pérdidas (RATS 15/10: x5 → x9 → x15 → x24, -236 USDT). Para y revisa antes de entrar." -f $lv, [double]$rec6[0].lev, ($rec6[0].sym -replace 'USDT$', ''), (($now - [long]$rec6[0].closedAt) / 60)); $warn++ }
+        $rec60 = @($rec6 | Where-Object { $_.sym -eq "${symR}USDT" -and ($now - [long]$_.closedAt) -gt 900 -and ($now - [long]$_.closedAt) -le 3600 })
+        if ($rec60.Count) { $L += ("⚠️ Reentras en {0} {1:N0} min después de cerrar con pérdida ({2:N0} USDT): respira y comprueba que la entrada cumple tus reglas, no que quieres recuperar." -f $symR, (($now - [long]$rec60[0].closedAt) / 60), [double]$rec60[0].pnlUsd); $warn++ }
         if ($perdHoy.Count -ge 2) { $L += ("⚠️ Llevas {0} operaciones perdedoras hoy ({1:N0} USDT): considera parar por hoy." -f $perdHoy.Count, ($perdHoy | Measure-Object pnlUsd -Sum).Sum); $warn++ }
     } catch {}
     $head = if ($warn -eq 0) { "🛡️ CONTROL DE RIESGO · todo dentro de tus reglas" } else { "🛡️ CONTROL DE RIESGO · $warn aviso(s) (solo informativo: tú decides)" }
