@@ -172,6 +172,7 @@ $script:HelpText = @"
 /opinion LARGO|CORTO SIMBOLO [PRECIO] · te doy mi opinión sobre una idea (sin SL, TP ni apalancamiento; no es una alerta). Ej.: /opinion largo BTC 85500 · /opinion corto TSLA 250
 /traders [SIMBOLO] · posicionamiento de los mejores traders: BTC y ETH sin argumentos; también cripto o acciones de EE. UU. (ej.: /traders TSLA)
 /ballenas [MONEDA] · posiciones de las mayores carteras de Hyperliquid (únicas públicas): cuánto hay en largo y en corto y las mayores posiciones. Ej.: /ballenas BTC
+/liquidez [MONEDA] [24h|3d|7d|30d] · mapa de calor de liquidaciones ESTIMADO (imagen estilo Coinglass; modelo con interés abierto, no datos reales). Sin argumentos: BTC en 24h y 3d. Ej.: /liquidez ETH 7d
 /ayuda · esta ayuda
 /id · muestra el identificador del chat
 
@@ -370,6 +371,11 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
                 if ($rsP.note -and $out -notlike 'No he podido*') { $out = $rsP.note + "`n" + $out }
                 Send-Tg $token $chat $out $m.message_id
             }
+            "/liquidez" {
+                if (-not (Get-Command Handle-Liquidez -ErrorAction SilentlyContinue)) { Send-Tg $token $chat "El mapa de liquidez no está disponible en este entorno." $m.message_id; break }
+                Send-Tg $token $chat "⏳ Calculando el mapa de liquidaciones estimado (unos segundos)..." $m.message_id
+                try { Handle-Liquidez $args1 $chat $token } catch { Send-Tg $token $chat "No he podido generar el mapa ahora: $($_.Exception.Message)" $null }
+            }
             "/momento" {
                 if (-not $args1) { Send-Tg $token $chat "Uso: /momento SIMBOLO [largo|corto]`nEjemplos: /momento AAPL · /momento BTC · /momento SAN.MC corto`nTe digo, con reglas fijas y visibles, si es buen momento para abrir un largo o un corto en ese activo." $m.message_id; break }
                 $mode = ""; $side = ""; $qw = Get-QueryWords $args1 @("largo", "long", "compra", "corto", "short", "venta", "accion", "acción", "bolsa", "stock", "cripto", "crypto")
@@ -421,6 +427,7 @@ if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PS
 if (Test-Path (Join-Path $PSScriptRoot "senal-compacta.ps1")) { . (Join-Path $PSScriptRoot "senal-compacta.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "macro-calendario.ps1")) { . (Join-Path $PSScriptRoot "macro-calendario.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "liquidez.ps1")) { . (Join-Path $PSScriptRoot "liquidez.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "mapa-liquidez.ps1")) { . (Join-Path $PSScriptRoot "mapa-liquidez.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "control-riesgo.ps1")) { . (Join-Path $PSScriptRoot "control-riesgo.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-tomada.ps1")) { . (Join-Path $PSScriptRoot "senal-tomada.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "ocr.ps1")) { . (Join-Path $PSScriptRoot "ocr.ps1") }
