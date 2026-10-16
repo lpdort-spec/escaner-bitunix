@@ -31,13 +31,22 @@ function Test-TendenciaTrigger($bars) {      # devuelve @{ sqz; don; ... } o $nu
     if (-not ($don -or $sqz -or $os)) { return $null }
     return @{ t = [long]$cl[$i].time; entry = $entry; sl = $entry - $risk; R = $risk; riskPct = $riskPct; don = $don; sqz = $sqz; os = $os; rsi = $rsi; rank = $rank }
 }
-function Register-TendenciaObs($sym, $tr, $kind) {
+function Register-TendenciaObs($sym, $tr, $kind, [bool]$real = $false) {
     $id = "$kind-$sym-$($tr.t)"; if (@(Read-Signals | Where-Object { $_.id -eq $id }).Count) { return $false }
     Add-SignalRecord ([ordered]@{
-        id = $id; time = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); sym = "${sym}USDT"; tf = '1d'; strat = 'arranque-obs'; side = 1; entryType = 'market'; entry = $tr.entry; sl = $tr.sl
+        id = $id; time = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); sym = "${sym}USDT"; tf = '1d'; strat = $(if ($real) { 'ruptura' } else { 'arranque-obs' }); side = 1; entryType = 'market'; entry = $tr.entry; sl = $tr.sl
         tp1 = $tr.entry + $tr.R; tp2 = $tr.entry + 2 * $tr.R; tp3 = $tr.entry + 3 * $tr.R; riskAbs = $tr.R; slPct = $tr.riskPct; lev = 1; status = 'open'; stage = 0; realized = 0.0; age = 0
-        lastLabel = $tr.t; lab0 = $tr.t; cost = 0.0015; outcome = $null; R = $null; net = $null; ctxScore = $null; ctxFlags = ("{0};btcEma200={2};sqzRank={1:N2};rsi={3:N0}" -f $(if ($kind -eq 'sqz') { 'squeeze' } elseif ($kind -eq 'rsi') { 'rsi-sobreventa' } else { 'donchian20' }), $tr.rank, $(if (Get-BtcDailyOk) { 1 } else { 0 }), $tr.rsi).Replace(',', '.'); note = "observación silenciosa: tendencia diaria ($kind)"
+        lastLabel = $tr.t; lab0 = $tr.t; cost = 0.0015; outcome = $null; R = $null; net = $null; ctxScore = $null; ctxFlags = ("{0};btcEma200={2};sqzRank={1:N2};rsi={3:N0}" -f $(if ($kind -eq 'sqz') { 'squeeze' } elseif ($kind -eq 'rsi') { 'rsi-sobreventa' } else { 'donchian20' }), $tr.rank, $(if (Get-BtcDailyOk) { 1 } else { 0 }), $tr.rsi).Replace(',', '.'); note = $(if ($real) { "señal real: squeeze diario" } else { "observación silenciosa: tendencia diaria ($kind)" })
     })
+    if ($real) {      # SQUEEZE diario con BTC sobre su EMA200: señal real desde 16/10/2026 (swing, a mercado). Privado con instrucciones; grupo sin ellas ni mención al privado
+        try { $lev = Get-SuggestedLev ([double]$tr.riskPct) 'cripto'
+            $n1 = "SQUEEZE DIARIO: el ancho de Bollinger estaba en el 25% más bajo de 120 días y la vela diaria cerró rompiendo al alza la banda superior, con BTC sobre su EMA200 diaria. Entrada a mercado (swing, pensado para varios días); SL a 2 ATR diarios."
+            $n2 = "Backtest (150 futuros, ~1000 días, gestión en tercios): 56% llegan a TP1, +0,16R neto de media (2ª mitad del periodo +0,50R). Ventaja pequeña, sin garantía; en reales aún pocos casos."
+            $n3 = "Gestión: margen aislado (máx. 200 USDT), SL en Bitunix, un tercio en cada TP y SL a la entrada tras el TP1. Con SL tan ancho el apalancamiento sale bajo: es normal en swing."      # solo privado
+            $mp = Format-CompactSignal 1 ("{0}/USDT · 1D" -f $sym) $null $tr.entry $false $lev $tr.sl ($tr.entry + $tr.R) ($tr.entry + 2 * $tr.R) ($tr.entry + 3 * $tr.R) 'cripto' '1d' @($n1, $n2, $n3)
+            $mg = Format-CompactSignal 1 ("{0}/USDT · 1D" -f $sym) $null $tr.entry $false $lev $tr.sl ($tr.entry + $tr.R) ($tr.entry + 2 * $tr.R) ($tr.entry + 3 * $tr.R) 'cripto' '1d' @($n1, $n2)
+            Send-ToSignalChats $mp; if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $mg $null } } catch {}
+    }
     return $true
 }
 function Run-TendenciaObsIfDue {      # una vez por día UTC (tras cerrar la vela diaria), por tandas de 25 monedas
@@ -46,10 +55,11 @@ function Run-TendenciaObsIfDue {      # una vez por día UTC (tras cerrar la vel
     $btcOk = Get-BtcDailyOk      # squeeze y Donchian solo con BTC sobre su EMA200 diaria; el largo por RSI diario <= 30 se registra siempre
     $tk = @((Invoke-RestMethod "$($script:CmdBase)/tickers" -TimeoutSec 25).data | Where-Object { $_.symbol -like "*USDT" } | Sort-Object { [double]$_.quoteVol } -Descending | Select-Object -First 150)
     if ($idx -ge $tk.Count) { return }; $end = [Math]::Min($idx + 25, $tk.Count); Set-ReportState "sqz" "${slot}:$end"; $found = 0
-    foreach ($t in @($tk[$idx..($end - 1)])) {
+    $hoyIni = [DateTimeOffset]::new([DateTime]::UtcNow.Date, [TimeSpan]::Zero).ToUnixTimeSeconds(); $sqzHoy = @(Read-Signals | Where-Object { "$($_.id)" -like 'sqz-*' -and $_.strat -eq 'ruptura' -and [long]$_.time -ge $hoyIni }).Count; $qi = $idx - 1
+    foreach ($t in @($tk[$idx..($end - 1)])) { $qi++
         try { $sym = $t.symbol -replace 'USDT$', ''; if ($sym -eq 'BTC') { continue }
             $b = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=$($t.symbol)&interval=1d&limit=200" -TimeoutSec 20).data | Sort-Object { [long]$_.time })
-            $tr = Test-TendenciaTrigger $b; if ($tr) { if ($btcOk -and $tr.sqz -and (Register-TendenciaObs $sym $tr 'sqz')) { $found++ }; if ($btcOk -and $tr.don -and (Register-TendenciaObs $sym $tr 'don')) { $found++ }; if ($tr.os -and (Register-TendenciaObs $sym $tr 'rsi')) { $found++ } } } catch {}
+            $tr = Test-TendenciaTrigger $b; if ($tr) { if ($btcOk -and $tr.sqz) { $realSq = ($qi -lt 80 -and $sqzHoy -lt 3); if (Register-TendenciaObs $sym $tr 'sqz' $realSq) { $found++; if ($realSq) { $sqzHoy++ } } }; if ($btcOk -and $tr.don -and (Register-TendenciaObs $sym $tr 'don')) { $found++ }; if ($tr.os -and (Register-TendenciaObs $sym $tr 'rsi')) { $found++ } } } catch {}
         Start-Sleep -Milliseconds 120 }
     Write-Host ("  [tendencia-obs 1d] tanda {0}-{1} de {2} · disparos registrados: {3}" -f $idx, $end, $tk.Count, $found) -ForegroundColor DarkGray
 }

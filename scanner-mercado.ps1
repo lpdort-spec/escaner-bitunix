@@ -4,7 +4,7 @@
 # y zoom out: >= 2R de espacio hasta el siguiente obstáculo semanal. SL mínimo 0,6%. Solo marco diario: en 1h no fue viable y en 4h fue débil.
 . (Join-Path $PSScriptRoot "universo-mercado.ps1")
 $script:MktUA = @{ 'User-Agent' = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36' }
-$script:MktCfg = @{ vol = 2.0; look = 20; maxExt = 1.2; minSl = 0.6; zoom = 2.0; depth = 1.0; win = 4 }
+$script:MktCfg = @{ vol = 2.0; look = 20; maxExt = 1.2; minSl = 0.6; zoom = 1.5; depth = 1.0; win = 4 }
 $script:MktDay = 86400000L
 
 function Get-MktBars($tkr) {      # velas diarias CERRADAS (sin la sesión en curso) + metadatos; $null si no hay datos suficientes
@@ -83,7 +83,7 @@ function Get-MktSetup($b) {
     $W = Mkt-Weekly $b; $wc = Mkt-WeeklyContext $W $px; if (-not $wc.ok) { return $null }
     $aligned = ($sgn -eq 1 -and $wc.trend -eq "up") -or ($sgn -eq -1 -and $wc.trend -eq "down"); $counter = ($sgn -eq 1 -and $wc.trend -eq "down") -or ($sgn -eq -1 -and $wc.trend -eq "up")
     if (($sgn -eq 1 -and $counter) -or ($sgn -eq -1 -and -not $aligned)) { return $null }                                     # tendencia semanal 'smart'
-    $sCounter = ($sgn -eq 1 -and $wc.struct -eq "down") -or ($sgn -eq -1 -and $wc.struct -eq "up"); if ($sCounter) { return $null }   # estructura semanal sin contra
+    # (16/10/2026) filtro de estructura semanal retirado: backtest 2 años, sin él +0,04R vs +0,02R con él y más señales; la tendencia semanal sigue exigida
     $lim = $px - $sgn * [Math]::Min($cfg.depth * $atr, [Math]::Abs($px - $lvl)); if ([Math]::Abs($px - $lim) -lt 0.05 * $atr) { return $null }   # retesteo del nivel roto
     $R = $sgn * ($lim - $sl); if ($R -le 0 -or ($R / $lim * 100) -lt $cfg.minSl) { return $null }
     $room = if ($sgn -eq 1) { if ($null -ne $wc.resLv) { ($wc.resLv - $lim) / $R } else { 99.0 } } else { if ($null -ne $wc.supLv) { ($lim - $wc.supLv) / $R } else { 99.0 } }

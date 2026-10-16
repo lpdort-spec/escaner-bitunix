@@ -42,6 +42,8 @@ function Get-RiskCheck($symR, [int]$sg, [double]$en, [double]$sl, [double]$tp, [
     try { if (Get-Command Get-MacroLine -ErrorAction SilentlyContinue) { $ml = Get-MacroLine; if ($ml) { $L += $ml } } } catch {}
     # 4a) todos los marcos temporales: 15m, 1h, 4h, 1d, 1S y 1M frente a la dirección de la operación
     try { $mt = Get-MultiTfLine $sg $symR $cur; if ($mt) { $L += $mt } } catch {}
+    # 4b) mapa de liquidez (pozos de stops) de la moneda y de BTC, y si el SL queda justo delante de un pozo
+    try { if (Get-Command Get-LiquidityLine -ErrorAction SilentlyContinue) { $lq = Get-LiquidityLine $sg $symR $cur $sl; if ($lq) { $L += $lq } } } catch {}
     # 4) lectura del mercado
     try {
         $s = @{ src = 'bitunix'; sym = $symR }; $cd4 = Get-MomentoCd $s '4h'; $cd1 = Get-MomentoCd $s '1d'

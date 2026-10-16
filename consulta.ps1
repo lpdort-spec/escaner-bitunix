@@ -41,6 +41,7 @@ function Get-ConsultaReport($raw, $wantSide) {
     else { $other = if ($wantSide -eq 'largo') { $sc.st.score } else { $sc.lg.score }; $mine = if ($wantSide -eq 'largo') { $sc.lg.score } else { $sc.st.score }; if ($other -ge $mine + 3) { $L += ("➡️ Ojo: el lado contrario puntúa {0} frente a {1} del que preguntas." -f $other, $mine) } }
     try { if (Get-Command Get-MacroLine -ErrorAction SilentlyContinue) { $ml = Get-MacroLine; if ($ml) { $L += $ml; $L += "" } } } catch {}      # evento macro cercano
     try { if (Get-Command Get-MultiTfLine -ErrorAction SilentlyContinue) { $sgm = if ($wantSide -eq 'largo') { 1 } elseif ($wantSide -eq 'corto') { -1 } else { 0 }; $mt = Get-MultiTfLine $sgm $q $px; if ($mt) { $L += $mt; $L += "" } } } catch {}      # 15m, 1h, 4h, 1D, 1S y 1M
+    try { if (Get-Command Get-LiquidityLine -ErrorAction SilentlyContinue) { $lq = Get-LiquidityLine 0 $q $px; if ($lq) { $L += $lq; $L += "" } } } catch {}      # pozos de liquidez (incluye BTC)
     try { if (Get-Command Get-SmartMoneyLines -ErrorAction SilentlyContinue) { $sm = @(Get-SmartMoneyLines $q); if ($sm.Count) { $L += $sm; $L += "" } } } catch {}
     $L += "🔒 Opera siempre en AISLADO (Bitunix puede ofrecerte cruzado por defecto en monedas nuevas), con SL puesto y parciales en tercios."
     $L += "ℹ️ Lectura de contexto con reglas fijas (estructura, ADX, MACD, RSI, Bollinger, volumen, obstáculos, funding y timing de 1h). No está validada como la táctica de rupturas con retesteo y no garantiza resultados. Si la abres, mándame la captura de la posición y la sigo en vivo."

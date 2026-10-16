@@ -420,6 +420,7 @@ if (Test-Path (Join-Path $PSScriptRoot "opinion.ps1")) { . (Join-Path $PSScriptR
 if (Test-Path (Join-Path $PSScriptRoot "informes-extra.ps1")) { . (Join-Path $PSScriptRoot "informes-extra.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-compacta.ps1")) { . (Join-Path $PSScriptRoot "senal-compacta.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "macro-calendario.ps1")) { . (Join-Path $PSScriptRoot "macro-calendario.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "liquidez.ps1")) { . (Join-Path $PSScriptRoot "liquidez.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "control-riesgo.ps1")) { . (Join-Path $PSScriptRoot "control-riesgo.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "senal-tomada.ps1")) { . (Join-Path $PSScriptRoot "senal-tomada.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "ocr.ps1")) { . (Join-Path $PSScriptRoot "ocr.ps1") }
