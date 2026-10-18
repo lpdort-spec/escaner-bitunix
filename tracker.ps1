@@ -22,7 +22,19 @@ function Save-Signals($sigs) {
     ($sigs | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 5 }) | Set-Content $script:SigFile -Encoding UTF8
 }
 function Add-SignalRecord($rec) {
+    try { if ($rec.id -and (Test-Path $script:SigFile) -and (Select-String -Path $script:SigFile -SimpleMatch ('"id":"' + $rec.id + '"') -Quiet)) { return } } catch {}      # nunca dos registros con el mismo id (señal repetida tras un reinicio)
     ($rec | ConvertTo-Json -Compress -Depth 5) | Add-Content $script:SigFile -Encoding UTF8
+}
+# ¿Ya se emitió esta señal (mismo id) o otra de la misma moneda y dirección en las últimas $hours horas (cualquier marco o táctica real)? Evita repeticiones: 1h y 4h casi iguales, la misma ruptura en velas consecutivas o tras un reinicio del bot.
+function Test-SignalDup($sym, [int]$side, $id, [double]$hours = 24) {
+    $s2 = "$sym"      # el símbolo se compara tal cual está en el registro (cripto: PARUSDT; acciones: AAPL)
+    $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    foreach ($r in @(Read-Signals)) {
+        if ($id -and "$($r.id)" -eq "$id") { return $true }
+        if ($r.manual -eq $true -or $r.strat -notin 'ruptura', 'arranque', 'ruptura-mercado') { continue }
+        try { if ("$($r.sym)" -eq $s2 -and [int]$r.side -eq $side -and ($now - [long]$r.time) -le $hours * 3600) { return $true } } catch {}
+    }
+    return $false
 }
 
 function Update-Signals($base) {

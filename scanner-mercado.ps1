@@ -132,6 +132,7 @@ function Scan-Market([switch]$Dry) {
         $s = Get-MktSetup $b; if (-not $s) { continue }
         $key = "mkt-$tkr-1d-$($s.barTime)"
         if (@(Read-Signals | Where-Object { $_.id -eq $key }).Count) { continue }
+        if (-not $Dry -and (Test-SignalDup $tkr $s.side $key 120)) { continue }      # misma acción y dirección en los últimos 5 días: no se repite
         $msg = Build-MktMessage $b $s
         $found++
         if ($Dry) { $script:MktDryOut += ,@($tkr, $msg); continue }

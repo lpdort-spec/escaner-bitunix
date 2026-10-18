@@ -18,6 +18,7 @@ function Test-ArranqueTrigger($bars) {      # bars: velas ordenadas, la última 
 }
 function Register-ArranqueObs($sym, $tr, [bool]$real = $false) {
     $id = "arq-$sym-$($tr.t)"; if (@(Read-Signals | Where-Object { $_.id -eq $id }).Count) { return $false }
+    if ($real -and (Test-SignalDup "${sym}USDT" 1 $id 12)) { $real = $false }      # ya hubo una señal real de esta moneda en 12 h: este disparo solo se mide, no se avisa
     $R = $tr.mid - $tr.l
     $lev = Get-SuggestedLev ([double]$tr.risk) 'cripto'      # apalancamiento orientativo: el SL cuesta como máximo el 20% del margen (regla de Luis)
     Add-SignalRecord ([ordered]@{

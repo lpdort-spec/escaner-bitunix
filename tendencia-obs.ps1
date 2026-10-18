@@ -33,6 +33,7 @@ function Test-TendenciaTrigger($bars) {      # devuelve @{ sqz; don; ... } o $nu
 }
 function Register-TendenciaObs($sym, $tr, $kind, [bool]$real = $false) {
     $id = "$kind-$sym-$($tr.t)"; if (@(Read-Signals | Where-Object { $_.id -eq $id }).Count) { return $false }
+    if ($real -and (Test-SignalDup "${sym}USDT" 1 $id 120)) { $real = $false }      # ya hubo una señal real de esta moneda en 5 días (el squeeze se repite en velas consecutivas): solo se mide
     Add-SignalRecord ([ordered]@{
         id = $id; time = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); sym = "${sym}USDT"; tf = '1d'; strat = $(if ($real) { 'ruptura' } else { 'arranque-obs' }); side = 1; entryType = 'market'; entry = $tr.entry; sl = $tr.sl
         tp1 = $tr.entry + $tr.R; tp2 = $tr.entry + 2 * $tr.R; tp3 = $tr.entry + 3 * $tr.R; riskAbs = $tr.R; slPct = $tr.riskPct; lev = 1; status = 'open'; stage = 0; realized = 0.0; age = 0

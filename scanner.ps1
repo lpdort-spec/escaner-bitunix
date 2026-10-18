@@ -365,6 +365,7 @@ function Scan($iv) {
                 $roiNoteG = if ($roi2 -lt 25) { ("ROI esperado en TP2 ≈ {0:N0}% del margen con x{1}: es bajo porque el apalancamiento recomendado limita la pérdida del SL al 20% del margen. La ventaja de la táctica está en el R (1R/2R/3R), no en el ROI." -f $roi2, $lev) } else { $null }
                 $genMsg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto' $iv @($slNote, $roiNoteG) }
             $photo = $null
+            if (Test-SignalDup $t.symbol $sgn $key 24) { $seen[$key] = $true; continue }      # ya hay una señal de esta moneda y dirección (otro marco, vela anterior o tras un reinicio): no se repite
             if (Send-Alert $key $msg $photo) {
                 if ($genMsg -and $TelegramToken) { try { Send-Tg $TelegramToken $script:MktChat $genMsg $null } catch {} }
                 $esf = ''; try { if (Get-Command Get-EmaSweepFlags -ErrorAction SilentlyContinue) { $esf = Get-EmaSweepFlags $sgn $name ([double]$entry) ([double]$risk) ([double]$entry) } } catch {}      # EMA a <= 1R y barrido, para medir con señales reales
