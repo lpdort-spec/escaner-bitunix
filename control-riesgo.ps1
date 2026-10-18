@@ -73,8 +73,14 @@ function Get-RiskCheck($symR, [int]$sg, [double]$en, [double]$sl, [double]$tp, [
         # escalada de apalancamiento tras perder (racha de RATS 15/10: x5 -> x9 -> x15 -> x24 en 26 h, -236 USDT) y reentradas en la misma moneda en menos de 60 min
         $rec6 = @($cerr | Where-Object { ($now - [long]$_.closedAt) -le 21600 -and $null -ne $_.pnlUsd -and [double]$_.pnlUsd -lt 0 -and $_.lev } | Sort-Object { [long]$_.closedAt } -Descending)
         if ($rec6.Count -and [double]$lv -gt [double]$rec6[0].lev) { $L += ("⚠️ Subes el apalancamiento a x{0:N0} justo después de perder con x{1:N0} en {2} hace {3:N0} min: es el patrón que más ha multiplicado tus pérdidas (RATS 15/10: x5 → x9 → x15 → x24, -236 USDT). Para y revisa antes de entrar." -f $lv, [double]$rec6[0].lev, ($rec6[0].sym -replace 'USDT$', ''), (($now - [long]$rec6[0].closedAt) / 60)); $warn++ }
-        $rec60 = @($rec6 | Where-Object { $_.sym -eq "${symR}USDT" -and ($now - [long]$_.closedAt) -gt 900 -and ($now - [long]$_.closedAt) -le 3600 })
-        if ($rec60.Count) { $L += ("⚠️ Reentras en {0} {1:N0} min después de cerrar con pérdida ({2:N0} USDT): respira y comprueba que la entrada cumple tus reglas, no que quieres recuperar." -f $symR, (($now - [long]$rec60[0].closedAt) / 60), [double]$rec60[0].pnlUsd); $warn++ }
+        $rec60 = @($rec6 | Where-Object { $_.sym -eq "${symR}USDT" -and ($now - [long]$_.closedAt) -gt 900 -and ($now - [long]$_.closedAt) -le 7200 })
+        $rec6x = @($cerr | Where-Object { $_.sym -eq "${symR}USDT" -and ($now - [long]$_.closedAt) -gt 900 -and ($now - [long]$_.closedAt) -le 7200 -and $null -ne $_.pnlUsd -and [double]$_.pnlUsd -lt 0 } | Sort-Object { [long]$_.closedAt } -Descending)
+        if ($rec6x.Count) { $L += ("⚠️ REGLA DE 2 HORAS: reentras en {0} a los {1:N0} min de cerrar con pérdida ({2:N0} USDT). Tu regla es no volver a la misma moneda en 2 h tras perder: espera a que pasen o descártala (es recuperar, no una señal)." -f $symR, (($now - [long]$rec6x[0].closedAt) / 60), [double]$rec6x[0].pnlUsd); $warn++ }
+        if (Get-Command Get-LimitesStatus -ErrorAction SilentlyContinue) { $ls = Get-LimitesStatus
+            if ($ls.dia -le - $script:LimDia) { $L += ("🛑 LÍMITE DIARIO ALCANZADO: llevas {0:N0} USDT de pérdida realizada hoy (máx. {1:N0}). Hoy no deberías abrir más; esta operación rompe tu regla." -f (-$ls.dia), $script:LimDia); $warn++ }
+            elseif ($ls.dia -le -0.8 * $script:LimDia) { $L += ("⚠️ Cerca del límite diario: {0:N0} de {1:N0} USDT perdidos hoy." -f (-$ls.dia), $script:LimDia); $warn++ }
+            if ($ls.sem -le - $script:LimSemana) { $L += ("🛑 LÍMITE SEMANAL ALCANZADO: {0:N0} USDT perdidos esta semana (máx. {1:N0}). Hasta el lunes no deberías abrir más." -f (-$ls.sem), $script:LimSemana); $warn++ }
+            elseif ($ls.sem -le -0.8 * $script:LimSemana) { $L += ("⚠️ Cerca del límite semanal: {0:N0} de {1:N0} USDT perdidos esta semana." -f (-$ls.sem), $script:LimSemana); $warn++ } }
         if ($perdHoy.Count -ge 2) { $L += ("⚠️ Llevas {0} operaciones perdedoras hoy ({1:N0} USDT): considera parar por hoy." -f $perdHoy.Count, ($perdHoy | Measure-Object pnlUsd -Sum).Sum); $warn++ }
     } catch {}
     $head = if ($warn -eq 0) { "🛡️ CONTROL DE RIESGO · todo dentro de tus reglas" } else { "🛡️ CONTROL DE RIESGO · $warn aviso(s) (solo informativo: tú decides)" }
