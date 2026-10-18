@@ -2,13 +2,12 @@
     {
         "value":  [
                       {
-                          "value":  "",
-                          "Count":  0
+                          "value":  " ARIAUSDT-4h-1792310400000 ARIAUSDT-1h-1792324800000",
+                          "Count":  3
                       },
-                      "ARIAUSDT-4h-1792310400000",
-                      "ARIAUSDT-1h-1792324800000"
+                      "ARIAUSDT-4h-1792310400000"
                   ],
-        "Count":  3
+        "Count":  2
     },
     "ARIAUSDT-4h-1792310400000"
 ]
