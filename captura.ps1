@@ -186,7 +186,7 @@ function Format-CapturaAnalysis($p, [bool]$register, [string]$who) {
     if ($ext -and $ext.stretched -and $verdict -eq "MANTENER") { if ($pct -gt 0) { $verdict = "PROTEGER"; $why += "el activo está estirado en 1h y vas en beneficio: toma un parcial ya y sube el SL a la entrada" } else { $verdict = "VIGILAR"; $why += "el activo está estirado en 1h: riesgo de retroceso hacia la media; no añadas posición" } }
     if ($null -ne $own -and $own -le 0 -and $opp -ge 6) { if ($inProfit) { $verdict = "PROTEGER"; $why += "la lectura se ha dado la vuelta en contra, pero tu SL ya asegura beneficio: valora tomar un parcial y deja el resto con ese SL" } else { $verdict = "CERRAR"; $why += "la lectura del activo se ha dado la vuelta en contra" } }
     elseif ($null -ne $own -and $own -lt 4 -and $verdict -eq "MANTENER") { $verdict = "VIGILAR"; $why += "la puntuación es floja ($own); si pierde más, valora cerrar" }
-    if ($mg -and $mg -gt 200) { $L += ("⚠️ El margen ({0:N0} USDT) supera tu límite de 200 USDT." -f $mg) }
+    if ($mg -and $mg -gt (Get-MargenMax)) { $L += ("⚠️ El margen ({0:N0} USDT) supera tu límite de {1:N0} USDT." -f $mg, (Get-MargenMax)) }
     $icon = switch ($verdict) { 'CERRAR' { "⛔" } 'PROTEGER YA' { "🚨" } 'PROTEGER' { "🔔" } 'VIGILAR' { "⚠️" } default { "✅" } }
     $L += ("{0} VEREDICTO: {1}{2}" -f $icon, $verdict, $(if ($why.Count) { " · " + ($why -join "; ") } else { " · la operación sigue vigente con el plan que tienes" }))
     # propuesta de objetivos

@@ -6,6 +6,14 @@ function Get-MadridNow {
     return [DateTime]::UtcNow.AddHours(2)
 }
 
+# ---------- Configuración de disciplina (limites.json): capital, margen por posición y límites de pérdida como % del capital ----------
+function Get-LimConfig {
+    $c = @{ capital = 450.0; margen = 75.0; pctDia = 5.0; pctSemana = 10.0 }
+    try { $j = Get-Content (Join-Path $PSScriptRoot "limites.json") -Raw -Encoding UTF8 | ConvertFrom-Json; foreach ($k in 'capital', 'margen', 'pctDia', 'pctSemana') { if ($null -ne $j.$k -and [double]$j.$k -gt 0) { $c[$k] = [double]$j.$k } } } catch {}
+    $c.dia = [Math]::Round($c.capital * $c.pctDia / 100, 0); $c.sem = [Math]::Round($c.capital * $c.pctSemana / 100, 0)
+    return $c
+}
+function Get-MargenMax { return [int](Get-LimConfig).margen }
 # ---------- Estado de los envíos programados (en last-report.txt, que el flujo de trabajo ya guarda en el repositorio) ----------
 function Get-ReportState($key) {
     $f = Join-Path $PSScriptRoot "last-report.txt"; if (-not (Test-Path $f)) { return $null }

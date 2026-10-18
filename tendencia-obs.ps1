@@ -42,7 +42,7 @@ function Register-TendenciaObs($sym, $tr, $kind, [bool]$real = $false) {
         try { $lev = Get-SuggestedLev ([double]$tr.riskPct) 'cripto'
             $n1 = "SQUEEZE DIARIO: el ancho de Bollinger estaba en el 25% más bajo de 120 días y la vela diaria cerró rompiendo al alza la banda superior, con BTC sobre su EMA200 diaria. Entrada a mercado (swing, pensado para varios días); SL a 2 ATR diarios."
             $n2 = "Backtest (150 futuros, ~1000 días, gestión en tercios): 56% llegan a TP1, +0,16R neto de media (2ª mitad del periodo +0,50R). Ventaja pequeña, sin garantía; en reales aún pocos casos."
-            $n3 = "Gestión: margen aislado (máx. 200 USDT), SL en Bitunix, un tercio en cada TP y SL a la entrada tras el TP1. Con SL tan ancho el apalancamiento sale bajo: es normal en swing."      # solo privado
+            $n3 = "Gestión: margen aislado (máx. $(Get-MargenMax) USDT), SL en Bitunix, un tercio en cada TP y SL a la entrada tras el TP1. Con SL tan ancho el apalancamiento sale bajo: es normal en swing."      # solo privado
             $mp = Format-CompactSignal 1 ("{0}/USDT · 1D" -f $sym) $null $tr.entry $false $lev $tr.sl ($tr.entry + $tr.R) ($tr.entry + 2 * $tr.R) ($tr.entry + 3 * $tr.R) 'cripto' '1d' @($n1, $n2, $n3)
             $mg = Format-CompactSignal 1 ("{0}/USDT · 1D" -f $sym) $null $tr.entry $false $lev $tr.sl ($tr.entry + $tr.R) ($tr.entry + 2 * $tr.R) ($tr.entry + 3 * $tr.R) 'cripto' '1d' @($n1, $n2)
             Send-ToSignalChats $mp; if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $mg $null } } catch {}

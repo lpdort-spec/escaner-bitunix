@@ -358,7 +358,7 @@ function Scan($iv) {
             $scSig = Get-SignalScore $name 'cripto' $sgn ([double]$entry)
             $slNote = $null; try { if (Get-Command Get-SlClusterNote -ErrorAction SilentlyContinue) { $slNote = Get-SlClusterNote $sgn $name $entry $sl $atr ([double]$entry) } } catch {}      # solo advertencia: el SL de las rupturas está validado en backtest y no se modifica
             $roiNote = if ($roi2 -lt 25) { ("ROI esperado en TP2 ≈ {0:N0}% del margen con x{1}: es bajo porque tu regla limita la pérdida al 20% del margen y el apalancamiento se acota por volatilidad. La ventaja de la táctica está en el R (1R/2R/3R), no en el ROI." -f $roi2, $lev) } else { $null }
-            $mgmtNote = "Gestión: margen aislado (máx. 200 USDT), SL puesto en Bitunix, un tercio en cada TP y SL a la entrada tras el TP1."      # solo para tu chat privado
+            $mgmtNote = "Gestión: margen aislado (máx. $(Get-MargenMax) USDT), SL puesto en Bitunix, un tercio en cada TP y SL a la entrada tras el TP1."      # solo para tu chat privado
             $msg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto' $iv @($slNote, $roiNote, $mgmtNote)
             $genMsg = $null
             if ($iv -eq "4h" -and $strat -eq "ruptura" -and $script:MktChat) {      # grupo Alertas Mercados: misma señal sin instrucciones personales ni mención a otros chats

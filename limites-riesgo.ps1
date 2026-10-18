@@ -1,6 +1,6 @@
-﻿# Reglas de disciplina de Luis (18/10/2026), SOLO para su chat privado: posición de 200 USDT de margen, pérdida máxima de 100 USDT al día y 250 USDT a la semana, no reentrar en la misma moneda
+﻿# Reglas de disciplina de Luis (18/10/2026), SOLO para su chat privado: capital, margen por posición y pérdida máxima al día y a la semana (limites.json; 18/10/2026: 450 USDT, 75 por posición, 5% al día y 10% a la semana), no reentrar en la misma moneda
 # en las 2 horas siguientes a cerrar con pérdida, y resumen semanal de sus operaciones. Se calcula con las operaciones CERRADAS que el bot conoce (las que registras con /operacion, /cerrar o capturas de cierre).
-$script:LimDia = 100.0; $script:LimSemana = 250.0; $script:ReentradaMin = 120
+$script:ReentradaMin = 120
 function Get-MisCerradas {
     return @(Read-Signals | Where-Object { $_.manual -eq $true -and $_.status -eq 'closed' -and $_.closedAt -and $null -ne $_.pnlUsd })
 }
@@ -12,11 +12,11 @@ function Get-LimitesStatus {      # PnL realizado hoy y en la semana (lunes a do
 }
 function Get-LimitesLine {
     $s = Get-LimitesStatus
-    return ("📏 Tus límites: hoy {0:+0;-0;0} USDT (máx. pérdida {1:N0}) · semana {2:+0;-0;0} USDT (máx. pérdida {3:N0}) · margen por posición 200 USDT · sin reentrar en la misma moneda en 2 h tras perder" -f $s.dia, $script:LimDia, $s.sem, $script:LimSemana)
+    return ("📏 Tus límites: hoy {0:+0;-0;0} USDT (máx. pérdida {1:N0}) · semana {2:+0;-0;0} USDT (máx. pérdida {3:N0}) · margen por posición {4:N0} USDT (capital {5:N0}) · sin reentrar en la misma moneda en 2 h tras perder" -f $s.dia, (Get-LimConfig).dia, $s.sem, (Get-LimConfig).sem, (Get-LimConfig).margen, (Get-LimConfig).capital)
 }
 function Check-LimitesRiesgo {      # aviso proactivo al chat privado: 80% y 100% del límite diario y semanal (una vez por periodo y nivel)
     $s = Get-LimitesStatus
-    foreach ($c in @(@('limd', $s.dia, $script:LimDia, $s.hoy, 'HOY', 'el límite diario'), @('limw', $s.sem, $script:LimSemana, $s.lunes, 'ESTA SEMANA', 'el límite semanal'))) {
+    foreach ($c in @(@('limd', $s.dia, (Get-LimConfig).dia, $s.hoy, 'HOY', 'el límite diario'), @('limw', $s.sem, (Get-LimConfig).sem, $s.lunes, 'ESTA SEMANA', 'el límite semanal'))) {
         $loss = - [double]$c[1]; if ($loss -le 0) { continue }; $lim = [double]$c[2]; $stage = if ($loss -ge $lim) { 2 } elseif ($loss -ge 0.8 * $lim) { 1 } else { 0 }; if ($stage -eq 0) { continue }
         $st = Get-ReportState $c[0]; $prev = 0; if ($st -match ('^' + [regex]::Escape($c[3]) + ':(\d)$')) { $prev = [int]$Matches[1] }; if ($prev -ge $stage) { continue }
         Set-ReportState $c[0] ("{0}:{1}" -f $c[3], $stage)
@@ -45,7 +45,7 @@ function Get-MisOperacionesResumen([int]$dias = 7) {
     $out += ("• Mejor: {0} {1:+0;-0} USDT · peor: {2} {3:+0;-0} USDT" -f ($best.sym -replace 'USDT$', ''), [double]$best.pnlUsd, ($worst.sym -replace 'USDT$', ''), [double]$worst.pnlUsd)
     $out += ("• Disciplina: {0} reentrada(s) en la misma moneda en menos de 2 h tras perder · {1} vez(ces) subiste el apalancamiento tras una pérdida" -f $re, $esc)
     if ($gw -gt 0 -and $perd.Count -and [Math]::Abs($gl) / $perd.Count -gt $gw / [Math]::Max(1, $gan.Count)) { $out += "• Ojo: tu pérdida media supera tu ganancia media; con este acierto no sale a cuenta. Corta antes las perdedoras o deja correr más las ganadoras." }
-    $s = Get-LimitesStatus; $out += ("• Semana en curso: {0:+0;-0;0} USDT de {1:N0} de pérdida máxima permitida" -f $s.sem, $script:LimSemana)
+    $s = Get-LimitesStatus; $out += ("• Semana en curso: {0:+0;-0;0} USDT de {1:N0} de pérdida máxima permitida" -f $s.sem, (Get-LimConfig).sem)
     return ($out -join "`n")
 }
 function Send-MisOperacionesSemanal {      # domingos tras las 22:00 (hora de España), una vez por semana; solo chat privado

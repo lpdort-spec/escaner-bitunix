@@ -28,7 +28,7 @@ function Register-ArranqueObs($sym, $tr, [bool]$real = $false) {
     if ($real) {      # señal REAL (desde 16/10/2026, por decisión de Luis): solo las 40 monedas con más volumen y como máximo 6 al día; mismo formato compacto que el resto
         try { $n1 = ("ARRANQUE: la vela de 1h subió {0:N1}% con volumen x{1:N1} y rompió el máximo de 48 velas. Entra SOLO con la orden limit al 50% de esa vela (se rellena si el precio retrocede en las 3 velas siguientes; si no, se descarta). A mercado, perseguir, NO tiene ventaja." -f $tr.ret, $tr.vx)
             $n2 = "Medido en señales reales: 63% llegan a TP1, neto +0,06R tras comisiones (35 casos): ventaja pequeña."
-            $n3 = "Gestión: margen aislado (máx. 200 USDT), SL puesto en Bitunix, un tercio en cada TP y SL a la entrada tras el TP1. Si no se ejecuta la orden en 3 velas, descártala."      # solo para tu chat privado
+            $n3 = "Gestión: margen aislado (máx. $(Get-MargenMax) USDT), SL puesto en Bitunix, un tercio en cada TP y SL a la entrada tras el TP1. Si no se ejecuta la orden en 3 velas, descártala."      # solo para tu chat privado
             $msgPriv = Format-CompactSignal 1 ("{0}/USDT · 1h" -f $sym) $null $tr.mid $true $lev $tr.l ($tr.mid + $R) ($tr.mid + 2 * $R) ($tr.mid + 3 * $R) 'cripto' '1h' @($n1, $n2, $n3)
             $msgGrp = Format-CompactSignal 1 ("{0}/USDT · 1h" -f $sym) $null $tr.mid $true $lev $tr.l ($tr.mid + $R) ($tr.mid + 2 * $R) ($tr.mid + 3 * $R) 'cripto' '1h' @($n1, $n2)      # grupo Alertas Mercados: misma señal, sin instrucciones personales ni mención a otros chats
             Send-ToSignalChats $msgPriv; if ($script:MktChat -and $TelegramToken) { Send-Tg $TelegramToken $script:MktChat $msgGrp $null } } catch {}

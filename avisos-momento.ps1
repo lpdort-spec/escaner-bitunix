@@ -31,10 +31,10 @@ function Get-MomScores($s) {
 # El bot NO abre ni cierra operaciones: solo calcula los valores para que los pongas tú.
 function Build-OrderCard($side, $plan) {
     if (-not $plan) { return $null }
-    $sg = if ($side -eq 'L') { 1 } else { -1 }; $en = [double]$plan.entry; $sl = [double]$plan.sl; $mg = 200.0
+    $sg = if ($side -eq 'L') { 1 } else { -1 }; $en = [double]$plan.entry; $sl = [double]$plan.sl; $mg = [double](Get-MargenMax)
     $slPct = [Math]::Abs($sl - $en) / $en * 100; if ($slPct -le 0) { return $null }
     $lev = [Math]::Min(20, [Math]::Floor((Get-SlMaxPct) / $slPct))
-    $L = @("📋 FICHA DE ORDEN · posición de 200 USDT de margen")
+    $L = @("📋 FICHA DE ORDEN · posición de $(Get-MargenMax) USDT de margen")
     if ($lev -lt 1) { $L += ("• El SL está a {0:N1}% del precio: con x1 ya perderías más del $((Get-SlMaxPct).ToString('N0'))% del margen. Reduce el margen o descarta esta entrada." -f $slPct); return ($L -join "`n") }
     $nom = $mg * $lev; $qty = $nom / $en; $loss = $nom * $slPct / 100; $liq = 100.0 / $lev
     $roi = { param($p) $sg * ($p - $en) / $en * 100 * $lev }

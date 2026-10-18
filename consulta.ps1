@@ -13,8 +13,8 @@ function Get-ConsultaSide($sc, [string]$sideKey, [string]$px, $sym = $null) {
     if ($pos.Count) { $o += "   A favor:"; $pos | ForEach-Object { $o += "   $_" } }
     if ($neg.Count) { $o += "   En contra / cuidado:"; $neg | ForEach-Object { $o += "   $_" } }
     if ($lv -and $score -ge 1) {
-        $lev = [int]$lv.lev; $mg = 200.0; $nom = $mg * $lev; $qty = $nom / $lv.entry; $loss = $nom * $lv.slPct / 100; $liq = 100.0 / [Math]::Max($lev, 1) - 0.3
-        $o += ""; $o += "🎯 Plan ($dir, margen 200 USDT AISLADO):"
+        $lev = [int]$lv.lev; $mg = [double](Get-MargenMax); $nom = $mg * $lev; $qty = $nom / $lv.entry; $loss = $nom * $lv.slPct / 100; $liq = 100.0 / [Math]::Max($lev, 1) - 0.3
+        $o += ""; $o += "🎯 Plan ($dir, margen $(Get-MargenMax) USDT AISLADO):"
         $o += ("   Entrada {0}{1} · SL {2} ({3:N1}% del precio)" -f (TaFp $lv.entry), $(if ($sc.plan.pullback) { " (orden limit en el retroceso)" } else { " (cerca del precio actual)" }), (TaFp $lv.sl), $lv.slPct)
         $o += ("   Parciales: TP1 {0} (1R, cierra un tercio y SL a la entrada) · TP2 {1} (2R) · TP final {2} (3R)" -f (TaFp $lv.t1), (TaFp $lv.t2), (TaFp $lv.t3))
         $o += ("   Apalancamiento orientativo x{0}: posición ≈ {1:N0} USDT ({2} uds); si salta el SL pierdes ≈ {3:N0} USDT ({4:N0}% del margen); liquidación a ≈ {5:N1}% del precio" -f $lev, $nom, (TaFp $qty), $loss, ($lv.slPct * $lev), $liq)
