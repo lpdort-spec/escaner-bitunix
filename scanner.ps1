@@ -48,6 +48,7 @@ if (Test-Path (Join-Path $PSScriptRoot "expansion-obs.ps1")) { . (Join-Path $PSS
 if (Test-Path (Join-Path $PSScriptRoot "bollinger-obs.ps1")) { . (Join-Path $PSScriptRoot "bollinger-obs.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "mesa-ballenas.ps1")) { . (Join-Path $PSScriptRoot "mesa-ballenas.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "tendencia-obs.ps1")) { . (Join-Path $PSScriptRoot "tendencia-obs.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "vix-aviso.ps1")) { . (Join-Path $PSScriptRoot "vix-aviso.ps1") }      # aviso del VIX en el nivel 19 (solo grupo Alertas Mercados)
 if (Test-Path (Join-Path $PSScriptRoot "limites-riesgo.ps1")) { . (Join-Path $PSScriptRoot "limites-riesgo.ps1") }      # límites de pérdida, reentradas y resumen semanal de tus operaciones (solo chat privado)
 if (Test-Path (Join-Path $PSScriptRoot "datos-mercado.ps1")) { . (Join-Path $PSScriptRoot "datos-mercado.ps1") }
 $TelegramSignalChatId = $env:TELEGRAM_SIGNAL_CHAT_ID
@@ -533,6 +534,7 @@ do {
     try { Send-WeeklyReport } catch {}
     try { if (Get-Command Check-LimitesRiesgo -ErrorAction SilentlyContinue) { Check-LimitesRiesgo } } catch {}
     try { if (Get-Command Send-MisOperacionesSemanal -ErrorAction SilentlyContinue) { Send-MisOperacionesSemanal } } catch {}
+    try { if (Get-Command Run-VixAlertIfDue -ErrorAction SilentlyContinue) { Run-VixAlertIfDue } } catch {}
     try { Save-StateNow } catch {}
     Write-Host ("{0} pasada completada" -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor DarkGray
     if (-not $Once) { $until = (Get-Date).AddSeconds($EverySeconds); while ((Get-Date) -lt $until) { Poll-Commands; try { Watch-TakenOrders } catch {}; if (Test-CodeUpdated) { $script:RestartNow = $true; break }; Start-Sleep -Seconds 6 } } else { Poll-Commands }
