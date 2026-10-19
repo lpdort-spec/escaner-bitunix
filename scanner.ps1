@@ -483,6 +483,28 @@ function Test-CodeUpdated {
     } catch {}
     return $false
 }
+$script:lastSaveAt = Get-Date
+function Save-StateNow {      # cada 30 min guarda el estado en el repositorio: si el servidor muere (pasó el 18/10 tras 5 h 16 min: "lost communication"), solo se pierde lo de los últimos minutos y no se repiten señales
+    if (-not $env:GITHUB_ACTIONS -or ((Get-Date) - $script:lastSaveAt).TotalMinutes -lt 30) { return }
+    $script:lastSaveAt = Get-Date
+    try {
+        $root = $PSScriptRoot; $files = @('seen.json', 'signals.jsonl', 'last-report.txt', 'bot-offset.txt')
+        $remote = "$((git -C $root ls-remote origin refs/heads/main 2>$null) | Select-Object -First 1)".Trim(); if ($remote.Length -ge 40) { $remote = $remote.Substring(0, 40) }
+        if ($remote.Length -eq 40 -and $script:codeSha.Length -ge 30 -and $remote -ne $script:codeSha) {      # alguien subió algo: si es código, no se toca y el reinicio normal lo recoge
+            git -C $root fetch -q origin main 2>$null
+            $chg = @(git -C $root diff --name-only $script:codeSha $remote 2>$null)
+            if (@($chg | Where-Object { $_ -and ($files -notcontains $_) -and ($_ -notlike 'datos/*') }).Count) { return } }
+        git -C $root config user.name "escaner"; git -C $root config user.email "escaner@users.noreply.github.com"
+        foreach ($f in $files) { if (Test-Path (Join-Path $root $f)) { git -C $root add $f 2>$null } }
+        if (Test-Path (Join-Path $root 'datos')) { git -C $root add datos 2>$null }
+        git -C $root diff --cached --quiet 2>$null; if ($LASTEXITCODE -eq 0) { return }
+        git -C $root commit -q -m "estado (intermedio)" 2>$null
+        git -C $root pull --rebase -q 2>$null
+        git -C $root push -q 2>$null
+        $script:codeSha = "$((git -C $root rev-parse HEAD 2>$null) | Select-Object -First 1)".Trim()
+        Write-Host "  [estado] guardado en el repositorio" -ForegroundColor DarkGray
+    } catch {}
+}
 try { if ((Get-Command Test-OcrAvailable -ErrorAction SilentlyContinue) -and $TelegramToken) { if (Test-OcrAvailable) { Write-Host "  [OCR] disponible: el análisis por captura de pantalla está activo." -ForegroundColor DarkGray } else { Send-ToSignalChats "⚠️ El análisis por captura de pantalla NO está disponible en el servidor (el OCR de Windows no funciona aquí). Mientras tanto usa /operacion o /señal tomada." } } } catch {}
 try { Import-ManualTrades (Join-Path $PSScriptRoot "operaciones-manuales.json") } catch {}
 try { Import-GroupTracking (Join-Path $PSScriptRoot "seguimiento-grupo.json") } catch {}      # tus operaciones reales entran en el seguimiento (solo se importan una vez)
@@ -511,6 +533,7 @@ do {
     try { Send-WeeklyReport } catch {}
     try { if (Get-Command Check-LimitesRiesgo -ErrorAction SilentlyContinue) { Check-LimitesRiesgo } } catch {}
     try { if (Get-Command Send-MisOperacionesSemanal -ErrorAction SilentlyContinue) { Send-MisOperacionesSemanal } } catch {}
+    try { Save-StateNow } catch {}
     Write-Host ("{0} pasada completada" -f (Get-Date -Format "HH:mm:ss")) -ForegroundColor DarkGray
     if (-not $Once) { $until = (Get-Date).AddSeconds($EverySeconds); while ((Get-Date) -lt $until) { Poll-Commands; try { Watch-TakenOrders } catch {}; if (Test-CodeUpdated) { $script:RestartNow = $true; break }; Start-Sleep -Seconds 6 } } else { Poll-Commands }
     if (-not $script:RestartNow -and -not $Once) { try { if (Test-CodeUpdated) { $script:RestartNow = $true } } catch {} }
