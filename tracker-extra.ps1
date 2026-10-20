@@ -199,7 +199,7 @@ function Get-CompactSummary {
     $mineOpen = @($all | Where-Object { ($_.strat -eq 'tomada' -or $_.manual -eq $true) -and $_.status -in 'open', 'pending' })
     $mineOpen = @($mineOpen | Group-Object sym | ForEach-Object { $_.Group | Sort-Object { if ($_.strat -eq 'tomada') { 0 } else { 1 } } | Select-Object -First 1 })      # una línea por moneda (si hay registro vivo y manual, el vivo)
     $mineClosed = @()      # desde 16/10/2026 el resumen NO informa de operaciones cerradas (petición de Luis): solo las que siguen en marcha
-    $trk = @($all | Where-Object { $_.strat -in 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'seg-priv' -and $_.manual -ne $true -and $_.status -in 'open', 'pending' } | Sort-Object { [long]$_.time } -Descending)
+    $trk = @($all | Where-Object { $_.strat -in 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'seg-priv', 'arranque' -and $_.manual -ne $true -and $_.status -in 'open', 'pending' } | Sort-Object { [long]$_.time } -Descending)
     $px = Get-LivePxMap (@($mineOpen) + @($trk | Where-Object { $_.status -eq 'open' }))
     $L = @(("📊 RESUMEN · {0:dd/MM HH:mm} (hora de España)" -f $now), "")
     $L += "👤 TUS OPERACIONES"

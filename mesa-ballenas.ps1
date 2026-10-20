@@ -24,7 +24,7 @@ function Run-MesaObs($positions) {
             $veto = 0; if (Get-Command Apply-SlStructure -ErrorAction SilentlyContinue) { $slx = $null; try { $slx = Apply-SlStructure $plan $side $sym $px } catch {}; if ($slx) { if ($slx.skip) { $veto = 1 } else { $score = $score + [int]$slx.delta } } }      # NOVA: si veta (obstáculo pegado a la entrada) se registra igualmente con veto=1 para medir si el veto acierta
             $lv = Get-OrderLevels $side $plan 'cripto' $score; if (-not $lv -or [int]$lv.lev -lt 1) { continue }
             $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-            $k = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=${sym}USDT&interval=4h&limit=3" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $last = [long]$k[$k.Count - 1].time
+            $k = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=${sym}USDT&interval=4h&limit=3" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $last = [long]$k[$k.Count - 2].time      # última vela CERRADA (con velas-cerradas.ps1 la última es la sintética en curso)
             Add-SignalRecord ([ordered]@{
                 id = $id; time = $now; sym = "${sym}USDT"; tf = '4h'; strat = 'arranque-obs'; side = $lv.sg
                 entryType = $(if ($plan.pullback) { 'limit' } else { 'market' }); entry = $lv.entry; sl = $lv.sl; tp1 = $lv.t1; tp2 = $lv.t2; tp3 = $lv.t3; riskAbs = [Math]::Abs($lv.entry - $lv.sl); slPct = $lv.slPct; lev = $lv.lev

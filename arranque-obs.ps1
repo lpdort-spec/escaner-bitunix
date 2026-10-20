@@ -4,6 +4,7 @@
 # Orden registrada: limit al 50% de la vela disparadora (se rellena si alguna de las 3 velas siguientes lo toca), SL en el mínimo de la vela, objetivos 1R/2R/3R con gestión en tercios (como el resto de señales).
 # Backtest previo (60 monedas, 50 días): a mercado -0,03R (sin ventaja); limit 50%: +0,37R (79% llegan a TP1). Pendiente de validar con datos reales antes de emitir ningún aviso.
 $script:ArqSent = 0
+$script:ArranquePausa = $true      # PAUSA 20/10/2026 (decisión de Luis): sin señales reales de Arranque hasta re-medirlas con el seguimiento corregido (velas-cerradas.ps1): las 35 "reales" anteriores se midieron con órdenes limit llenadas por velas previas al envío. Se sigue registrando en observación. Poner $false para reactivar.
 function Test-ArranqueTrigger($bars) {      # bars: velas ordenadas, la última es la que se está formando; se evalúa la última cerrada
     if ($bars.Count -lt 62) { return $null }
     $cl = @($bars[0..($bars.Count - 2)]); $i = $cl.Count - 1; $c0 = $cl[$i]
@@ -49,7 +50,7 @@ function Run-ArranqueObsIfDue {      # cada vez que cierra una vela de 1h, por t
             $sym = $t.symbol -replace 'USDT$', ''
             $b = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=$($t.symbol)&interval=1h&limit=70" -TimeoutSec 20).data | Sort-Object { [long]$_.time })
             $tr = Test-ArranqueTrigger $b
-            if ($tr) { $real = ($q -lt 40 -and $realHoy -lt 6); if (Register-ArranqueObs $sym $tr $real) { $found++; if ($real) { $realHoy++ } } }
+            if ($tr) { $real = ($q -lt 40 -and $realHoy -lt 6 -and -not $script:ArranquePausa); if (Register-ArranqueObs $sym $tr $real) { $found++; if ($real) { $realHoy++ } } }
         } catch {}
         Start-Sleep -Milliseconds 120
     }

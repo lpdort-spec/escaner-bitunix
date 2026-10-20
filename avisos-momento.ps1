@@ -69,7 +69,7 @@ function Build-MomAlert($kind, $sym, $side, $score, $plan = $null, $notes = $nul
 function Register-MomSignal($kind, $sym, $lv, $plan, $obs = $false) {      # cada aviso emitido queda registrado: se vigila (cambios de lectura, nuevos SL/TP) igual que las rupturas
     try {
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); $last = [long]0
-        if ($kind -eq 'cripto') { $k = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=${sym}USDT&interval=4h&limit=3" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $last = [long]$k[$k.Count - 1].time }
+        if ($kind -eq 'cripto') { $k = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=${sym}USDT&interval=4h&limit=3" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $last = [long]$k[$k.Count - 2].time }      # última vela CERRADA (con velas-cerradas.ps1 la última es la sintética en curso)
         else { $b = Get-MktBars $sym; if ($b) { $last = [long]$b.t[$b.n - 1] } }
         Add-SignalRecord ([ordered]@{
             id = "$(if ($obs) { 'momobs' } else { 'mom' })-$sym-$($lv.sg)-$now"; time = $now; sym = $(if ($kind -eq 'cripto') { "${sym}USDT" } else { $sym }); src = $(if ($kind -eq 'cripto') { $null } else { 'yahoo' }); tf = $(if ($kind -eq 'cripto') { '4h' } else { '1d' }); strat = $(if ($obs) { 'arranque-obs' } else { 'aviso-momento' }); side = $lv.sg

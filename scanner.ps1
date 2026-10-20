@@ -31,6 +31,7 @@ if (-not $TelegramToken -and $env:TELEGRAM_TOKEN) { $TelegramToken = $env:TELEGR
 $cfg = Join-Path $PSScriptRoot "telegram.json"
 if (-not $TelegramToken -and (Test-Path $cfg)) { $c = Get-Content $cfg -Raw | ConvertFrom-Json; $TelegramToken = $c.token; $TelegramChatId = $c.chatId }
 if ($StateFile -and (Test-Path $StateFile)) { foreach ($k in @(Get-Content $StateFile -Raw | ConvertFrom-Json)) { $seen[$k] = $true } }
+. (Join-Path $PSScriptRoot "velas-cerradas.ps1")      # corrección de la vela de retraso (la API solo devuelve velas cerradas): ver el fichero
 . (Join-Path $PSScriptRoot "tracker.ps1")
 if (Test-Path (Join-Path $PSScriptRoot "tracker-extra.ps1")) { . (Join-Path $PSScriptRoot "tracker-extra.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "informe-semanal.ps1")) { . (Join-Path $PSScriptRoot "informe-semanal.ps1") }
