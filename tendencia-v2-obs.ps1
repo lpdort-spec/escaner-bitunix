@@ -1,14 +1,18 @@
 ﻿# OBSERVACIÓN SILENCIOSA "Tendencia v2" (largos, velas de 4h y 1d). NO envía nada: registra cada disparo en signals.jsonl (strat 'arranque-obs', id 'tv2-<tf>-<moneda>-<vela>', mode 'trail') para medir qué habría pasado.
 # Origen: investigación del 20/10/2026 (autopsia de 221 señales cerradas + bt-modelos / bt-gestion / bt-tendencia). Las entradas sin impulso eran la causa de la mayoría de SL; los tercios 1R/2R/3R con BE recortaban a los pocos ganadores.
 # Disparo (vela cerrada): cierre por encima del máximo de las 20 velas previas, volumen >= 2x la media de 20 velas y movimiento previo >= 5% (4h: 6 velas ~24h; 1d: 3 velas).
-# Entrada hipotética a mercado en la apertura de la vela siguiente. SL bajo la mínima de la vela de ruptura - 0,1 ATR(14) (riesgo máx. 4 ATR). Gestión: SIN tercios ni BE; stop dinámico Chandelier 3 ATR desde el máximo (lo calcula tracker.ps1, mode 'trail'); cierre por tiempo a 40 velas (4h) o 20 (1d).
+# Entrada hipotética a mercado en la apertura de la vela siguiente (= último cierre; ver Add-FormingBar: la API solo devuelve velas cerradas). SL bajo la mínima de la vela de ruptura - 0,1 ATR(14) (riesgo máx. 4 ATR). Gestión: SIN tercios ni BE; stop dinámico Chandelier 3 ATR desde el máximo (lo calcula tracker.ps1, mode 'trail'); cierre por tiempo a 40 velas (4h) o 20 (1d).
 # Backtest (bt-gestion.ps1, 67 pares, ~200 días, coste 0,15%): 4h +0,29R (1ª mitad +0,23 · 2ª +0,34), 1d +0,26R; con 102 pares y más periodo: 4h +0,16R, 1d +0,14R. Con tercios+BE salía ~0 a +0,16R. Ventaja pequeña, sin garantía; se mide en real antes de avisar.
 # SEGUNDA TÁCTICA (solo 1d, largos): BARRIDO DE LIQUIDEZ CON CONFIRMACIÓN (idea estudiada del grupo Crypto Ballena VIP / SMC). Barrido del mínimo de 20 velas (mecha que lo supera y cierre de vuelta dentro) en las últimas 5 velas + vela de DESPLAZAMIENTO (alcista, cuerpo >= 0,75 ATR) que cierra por encima del último swing alto (cambio de estructura). SL bajo la mínima del barrido - 0,1 ATR (máx. 4 ATR); misma gestión trailing. Backtest (bt-sweep-conf.ps1, ~120 pares, ~3 años, 0,15%): +0,26R con tercios, +0,45R con trailing (n=84; 1ª mitad +0,21 · 2ª +0,58); sin confirmación salía -0,19R. Muestra pequeña (~30 casos/año): solo se mide. ids 'tv2s-1d-...'.
 # Se registra SIEMPRE y se etiqueta el régimen de BTC (btcEma50 y btcEma200 en ctxFlags) para medir después si conviene exigirlo. No se avisa hasta >=30 casos cerrados por marco y esperanza neta positiva.
-function Get-BtcRegimeTf([string]$iv) {      # BTC sobre su EMA50 / EMA200 en el mismo marco (cache 30 min)
+function Add-FormingBar($bars, [string]$iv) {      # La API de velas de Bitunix SOLO devuelve velas cerradas (comprobado 20/10/2026); el código del bot supone que la última es la vela en curso y la descarta, con lo que evalúa una vela de retraso y usa como entrada la apertura de una vela ya cerrada. Se añade una vela en curso sintética (apertura = último cierre) para evaluar siempre la última vela cerrada.
+    $dur = $(switch ($iv) { '1h' { 3600000 } '4h' { 14400000 } default { 86400000 } }); $b = @($bars); if ($b.Count -eq 0) { return $b }; $last = $b[$b.Count - 1]
+    if (([long]$last.time + $dur) -le [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) { $b += [pscustomobject]@{ time = [string]([long]$last.time + $dur); open = $last.close; high = $last.close; low = $last.close; close = $last.close; baseVol = '0'; quoteVol = '0'; volume = '0' } }
+    return $b
+}function Get-BtcRegimeTf([string]$iv) {      # BTC sobre su EMA50 / EMA200 en el mismo marco (cache 30 min)
     if (-not $script:TV2Btc) { $script:TV2Btc = @{} }; $c = $script:TV2Btc[$iv]; if ($c -and ((Get-Date) - $c.at).TotalMinutes -lt 30) { return $c }
     $r = @{ at = Get-Date; e50 = 0; e200 = 0 }
-    try { $k = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=BTCUSDT&interval=$iv&limit=200" -TimeoutSec 20).data | Sort-Object { [long]$_.time }); $cl = @($k[0..($k.Count - 2)] | ForEach-Object { [double]$_.close })
+    try { $k = Add-FormingBar @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=BTCUSDT&interval=$iv&limit=200" -TimeoutSec 20).data | Sort-Object { [long]$_.time }) $iv; $cl = @($k[0..($k.Count - 2)] | ForEach-Object { [double]$_.close })
         $e5 = Get-EmaValue $cl 50; $e2 = Get-EmaValue $cl 200; $r.e50 = [int]($e5 -and $cl[-1] -gt $e5); $r.e200 = [int]($e2 -and $cl[-1] -gt $e2) } catch {}
     $script:TV2Btc[$iv] = $r; return $r
 }
@@ -63,7 +67,7 @@ function Run-TendenciaV2ObsIfDue {      # cada vez que cierra una vela de 4h (y 
         if ($idx -ge $tk.Count) { continue }; $end = [Math]::Min($idx + 25, $tk.Count); Set-ReportState $key "${slot}:$end"; $found = 0
         foreach ($t in @($tk[$idx..($end - 1)])) {
             try { $sym = $t.symbol -replace 'USDT$', ''; if ($sym -eq 'BTC') { Start-Sleep -Milliseconds 100; continue }
-                $b = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=$($t.symbol)&interval=$iv&limit=100" -TimeoutSec 20).data | Sort-Object { [long]$_.time })
+                $b = Add-FormingBar @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=$($t.symbol)&interval=$iv&limit=100" -TimeoutSec 20).data | Sort-Object { [long]$_.time }) $iv
                 $tr = Test-TendenciaV2Trigger $b $iv; if ($tr -and (Register-TendenciaV2Obs $sym $tr $iv)) { $found++ }
                 if ($iv -eq '1d') { $ts = Test-SweepConfTrigger $b; if ($ts -and (Register-TendenciaV2Obs $sym $ts $iv 'tv2s')) { $found++ } } } catch {}
             Start-Sleep -Milliseconds 120 }
