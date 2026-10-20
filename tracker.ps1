@@ -12,7 +12,7 @@ function Read-Signals {
     $recs = @(Get-Content $script:SigFile -Encoding UTF8 | Where-Object { $_.Trim() } | ForEach-Object { $_ | ConvertFrom-Json })
     # PowerShell no permite asignar propiedades inexistentes en objetos de JSON: se añaden todas las que el seguimiento puede escribir
     foreach ($r0 in $recs) {
-        foreach ($p in 'note', 'closedAt', 'exit', 'pnlUsd', 'lab0', 'manual', 'mode', 'sentiment', 'qty', 'sl0', 'closeNote', 'ctxScore', 'ctxFlags', 'cost', 'src', 'expiry') {
+        foreach ($p in 'note', 'closedAt', 'exit', 'pnlUsd', 'lab0', 'manual', 'mode', 'sentiment', 'qty', 'sl0', 'closeNote', 'ctxScore', 'ctxFlags', 'cost', 'src', 'expiry', 'atr0', 'ext') {
             if (-not ($r0.PSObject.Properties.Name -contains $p)) { $r0 | Add-Member -NotePropertyName $p -NotePropertyValue $null }
         }
     }
@@ -66,6 +66,14 @@ function Update-Signals($base) {
             $hitSL = if ($sgn -eq 1) { $lo -le $s.sl } else { $hi -ge $s.sl }
             $reachEntry = if ($sgn -eq 1) { $lo -le $s.entry } else { $hi -ge $s.entry }
             $reachTP = { param($lvl) if ($sgn -eq 1) { $hi -ge $lvl } else { $lo -le $lvl } }
+            if ($s.mode -eq 'trail') {      # TENDENCIA v2 (observación): solo largos; stop dinámico Chandelier 3 ATR(14) desde el máximo, sin tercios ni BE; el SL de partida está en sl0 (riesgo inicial = riskAbs)
+                $s.age = [int]$s.age + 1; $stopNow = [double]$s.sl
+                if ($lo -le $stopNow) { $s.status = 'closed'; $s.exit = [Math]::Min($stopNow, [double]$c.open); $s.outcome = $(if ($stopNow -gt [double]$s.entry) { 'trail +' } else { 'SL' }); break }
+                $ext = if ($null -ne $s.ext) { [double]$s.ext } else { [double]$s.entry }; if ($hi -gt $ext) { $ext = $hi }; $s.ext = $ext
+                $ns = $ext - 3 * [double]$s.atr0; if ($ns -gt $stopNow -and [int]$s.age -gt 1) { $s.sl = $ns }      # como en el backtest: el stop no se mueve en la vela de entrada
+                if ([int]$s.age -ge $(if ($s.tf -eq '1d') { 20 } else { 40 })) { $s.status = 'closed'; $s.exit = $cl; $s.outcome = 'tiempo'; break }
+                continue
+            }
             if ($s.manual -eq $true -or $s.mode -eq 'single') {      # salida única (SL o TP): operaciones manuales del usuario y estrategias en observación (sin gestión simulada)
                 $s.age = [int]$s.age + 1
                 if ($hitSL) { $s.status = 'closed'; $s.exit = [double]$s.sl; $s.outcome = $(if ($sgn * ([double]$s.sl - [double]$s.entry) -gt 0) { 'SL en beneficio' } else { 'SL' }); break }
@@ -97,7 +105,7 @@ function Update-Signals($base) {
                 $s.R = [double]$s.realized + $left * [Math]::Max(-1.0, [Math]::Min(3.0, $m)); $s.status = 'closed'; $s.outcome = 'tiempo'; break
             }
         }
-        if (($s.manual -eq $true -or $s.mode -eq 'single') -and $s.status -eq 'closed' -and $null -eq $s.net -and $null -ne $s.exit) {
+        if (($s.manual -eq $true -or $s.mode -eq 'single' -or $s.mode -eq 'trail') -and $s.status -eq 'closed' -and $null -eq $s.net -and $null -ne $s.exit) {
             $s.R = $sgn * ([double]$s.exit - [double]$s.entry) / [double]$s.riskAbs
             $q = if ($s.qty) { [double]$s.qty } elseif ($s.margin -and $s.lev) { [double]$s.margin * [double]$s.lev / [double]$s.entry } else { $null }
             if ($q) { $s.pnlUsd = [Math]::Round($sgn * ([double]$s.exit - [double]$s.entry) * $q - $q * [double]$s.entry * $script:CostRT, 2) }
