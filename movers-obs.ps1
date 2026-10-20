@@ -1,8 +1,26 @@
-# OBSERVACIÓN SILENCIOSA "Movers diarios" (largos). NO envía nada: registra en signals.jsonl (strat 'arranque-obs', mode 'trail', id 'mov-1d-<moneda>-<vela>') los futuros que cierran el DÍA con una subida >= 20 % para medir si "subirse a la tendencia" tiene ventaja.
+﻿# OBSERVACIÓN SILENCIOSA "Movers diarios" (largos). NO envía nada: registra en signals.jsonl (strat 'arranque-obs', mode 'trail', id 'mov-1d-<moneda>-<vela>') los futuros que cierran el DÍA con una subida >= 20 % para medir si "subirse a la tendencia" tiene ventaja.
 # Idea de Luis (20/10/2026): los que suben mucho en el día a veces siguen (+40 % -> +100 %) porque van a buscar una EMA diaria/semanal. Backtest (bt-movers-ema.ps1, ~117 pares, ~800 días, 197 casos, entrada en la apertura siguiente, stop dinámico 3 ATR, 20 días, neto 0,15 %):
 #   - Ya sobre las 3 EMA (50/200/140 diaria): MFE a 10 días mediana +21 %, >=+50 % en el 22 % y >=+100 % en el 12 % de los casos; trailing: media +11,8 % pero mediana -5,1 % y 43 % ganadoras (pocas ganadoras enormes). Días de +35 % o más: >=+100 % en el 20-25 %.
 #   - Con la EMA objetivo POR ENCIMA del precio (imán) hay muy pocos casos (34) para concluir; con la EMA a < 10 % por encima salió negativo (-1,1 %).
 # Se registra con las distancias a las EMA en ctxFlags para medirlo en real. Pago asimétrico: muchas pequeñas pérdidas y pocas ganancias grandes; no se avisa hasta >=30 casos cerrados con esperanza neta positiva.
+# AVISO AL PRIVADO (desactivado). Decisión de Luis (20/10/2026): avisar SOLO a su chat privado, y únicamente cuando el análisis de >=30 casos cerrados (analizar-tendencia-v2.ps1 / revisión programada) sea positivo.
+# Lo activa la revisión programada cambiando $script:MoversAviso a $true y rellenando $script:MoversStats con las cifras reales medidas. Nunca va al grupo ni a BINGUEROS.
+$script:MoversAviso = $false
+$script:MoversStats = ""      # p. ej. "Medido en real: 34 casos cerrados, 41% ganadoras, +0,35R neto de media (trailing 3 ATR)."
+function Send-MoversAlert($sym, $tr) {
+    if (-not $script:MoversAviso) { return }
+    try { $mg = $(if (Get-Command Get-MargenMax -ErrorAction SilentlyContinue) { [double](Get-MargenMax) } else { 75 }); $loss = $mg * $tr.riskPct / 100
+        $L = @("🚀 MOVER DIARIO (largo) · $sym/USDT · +$([Math]::Round($tr.r1))% en el día · volumen $([Math]::Round($tr.vx)) M USDT")
+        $L += ("Entrada: ~{0} (a mercado, swing)" -f (TaFp $tr.entry))
+        $L += ("SL inicial: {0} (3 ATR diarios = {1:N0}% del precio). Sin apalancar y con margen {2:N0} USDT, si salta pierdes ~{3:N0} USDT (regla: SL <= 35% del margen)." -f (TaFp $tr.sl), $tr.riskPct, $mg, $loss)
+        if ($tr.riskPct -gt 35) { $L += "⚠️ El SL supera el 35% del margen incluso sin apalancar: no encaja con tus reglas; reduce el margen o descártala." }
+        $L += "Gestión: SIN objetivos fijos. Stop dinámico a 3 ATR desde el máximo (solo sube, nunca baja); máx. 20 días. Margen aislado."
+        $L += ("EMA diaria: a {0:N0}% de la EMA50 · {1:N0}% de la EMA200 · {2:N0}% de la EMA140 (~semanal){3}" -f $tr.d50, $tr.d200, $tr.d140, $(if ($tr.room -ge 0) { ", EMA más cercana por encima a +{0:N0}%" -f $tr.room } else { ", ya sobre las 3 EMA" }))
+        if ($script:MoversStats) { $L += "📊 $($script:MoversStats)" }
+        $L += "ℹ️ Pocas ganadoras grandes y muchas pérdidas pequeñas: la mediana es negativa. Tamaño pequeño y no persigas si ya se ha disparado."
+        if (Get-Command Send-ToSignalChats -ErrorAction SilentlyContinue) { Send-ToSignalChats ($L -join "`n") }
+    } catch {}
+}
 function Test-MoversTrigger($bars) {      # $bars = velas 1d ordenadas, la última es la vela EN CURSO (la real o la sintética de velas-cerradas.ps1)
     if ($bars.Count -lt 210) { return $null }
     $cl = @($bars[0..($bars.Count - 2)]); $cur = $bars[$bars.Count - 1]; $i = $cl.Count - 1
@@ -35,7 +53,7 @@ function Run-MoversObsIfDue {      # una vez por día UTC, tras cerrar la vela d
     foreach ($t in @($tk[$idx..($end - 1)])) {
         try { $sym = $t.symbol -replace 'USDT$', ''; if ($sym -eq 'BTC') { continue }
             $b = @((Invoke-RestMethod "$($script:CmdBase)/kline?symbol=$($t.symbol)&interval=1d&limit=220" -TimeoutSec 20).data | Sort-Object { [long]$_.time })
-            $tr = Test-MoversTrigger $b; if ($tr -and (Register-MoversObs $sym $tr)) { $found++ } } catch {}
+            $tr = Test-MoversTrigger $b; if ($tr -and (Register-MoversObs $sym $tr)) { $found++; Send-MoversAlert $sym $tr } } catch {}
         Start-Sleep -Milliseconds 120 }
     Write-Host ("  [movers-obs 1d] tanda {0}-{1} de {2} · disparos registrados: {3}" -f $idx, $end, $tk.Count, $found) -ForegroundColor DarkGray
 }
