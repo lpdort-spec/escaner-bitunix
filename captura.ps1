@@ -200,6 +200,10 @@ function Format-CapturaAnalysis($p, [bool]$register, [string]$who) {
     if ($mg -and $mg -gt (Get-MargenMax)) { $L += ("⚠️ El margen ({0:N0} USDT) supera tu límite de {1:N0} USDT." -f $mg, (Get-MargenMax)) }
     $icon = switch ($verdict) { 'CERRAR' { "⛔" } 'PROTEGER YA' { "🚨" } 'PROTEGER' { "🔔" } 'VIGILAR' { "⚠️" } default { "✅" } }
     $L += ("{0} VEREDICTO: {1}{2}" -f $icon, $verdict, $(if ($why.Count) { " · " + ($why -join "; ") } else { " · la operación sigue vigente con el plan que tienes" }))
+    # SL PROVISIONAL: si la captura no deja ver el SL (recorte sin la columna TP/SL o tarjeta de ROI), la operación se registra igualmente con el SL que marcan tus reglas, para vigilarla; se avisa de que es provisional
+    $prov = $false
+    if ($register -and -not $sl -and $en -gt 0 -and $dsug -gt 0) { $dp = [double]$dsug; if ($p.liq) { $dl2 = [Math]::Abs($en - [double]$p.liq); if ($dl2 -gt 0) { $dp = [Math]::Min($dp, 0.6 * $dl2) } }; $sl = $en - $sg * $dp; $prov = $true
+        $L += ("🧩 SL PROVISIONAL {0} (no se ve en la captura; calculado con tu regla de pérdida máxima y siempre antes de la liquidación). Registro la operación con él para vigilarla; si tu SL real es otro, o aún no lo has puesto, envíame /operacion {1} {2} {3} SL TP MARGEN APALANCAMIENTO o una captura con la columna TP/SL." -f (TaFp $sl), $sym, $(if ($sg -eq 1) { 'LARGO' } else { 'CORTO' }), (TaFp $en)) }
     # propuesta de objetivos
     $tgt = $null
     if ($sl -and -not $inProfit) { $R = [Math]::Abs($en - $sl); $t1 = $en + $sg * $R; $t2 = $en + $sg * 2 * $R; $t3 = $en + $sg * 3 * $R
@@ -218,9 +222,9 @@ function Format-CapturaAnalysis($p, [bool]$register, [string]$who) {
         Add-SignalRecord ([ordered]@{
             id = "tomada-$sym-$now"; time = $now; sym = "${sym}USDT"; src = $null; tf = '4h'; strat = 'tomada'; dest = 'priv'; by = "$who"; chat = ""; side = $sg; entryType = 'market'
             entry = $en; sl = $sl; sl0 = $sl; tp1 = $tgt.t1; tp2 = $tgt.t2; tp3 = $tgt.t3; riskAbs = $R; slPct = ($R / $en * 100); lev = $(if ($lev) { $lev } else { 1 }); margin = $mg; status = 'open'; stage = 0; realized = 0.0; age = 0; lastLabel = 0; lab0 = 0
-            cost = 0.0015; outcome = $null; R = $null; net = $null; ctxScore = $ctx; chkAt = $now; closeNote = ""; origen = "captura"; note = "Operación leída de una captura"
+            cost = 0.0015; outcome = $null; R = $null; net = $null; ctxScore = $ctx; chkAt = $now; closeNote = ""; origen = "captura"; note = $(if ($prov) { "Operación leída de una captura (SL provisional: no se veía en la captura)" } else { "Operación leída de una captura" })
         })
-        $L += ""; $L += "👁️ Operación registrada y vigilada en vivo: te aviso al momento de TP1/TP2/TP final, stop, cercanía al SL y cambios de lectura. Ciérrala con /señal cerrada $sym PRECIO."
+        $L += ""; $L += $(if ($prov) { "👁️ Operación registrada con SL PROVISIONAL y vigilada en vivo: te aviso de TP1/TP2/TP final, cercanía a ese SL y cambios de lectura. Ciérrala con /señal cerrada $sym PRECIO." } else { "👁️ Operación registrada y vigilada en vivo: te aviso al momento de TP1/TP2/TP final, stop, cercanía al SL y cambios de lectura. Ciérrala con /señal cerrada $sym PRECIO." })
     }
     elseif ($register -and $inProfit -and $tp -and $mg -and $lev -and (Get-Command Add-LiveOrder -ErrorAction SilentlyContinue)) {
         try { Add-LiveOrder $sym $sg $en $sl $tp $mg $lev 'captura' "$who"; $L += ""; $L += "👁️ Operación registrada y vigilada en vivo con tu SL en beneficio ($(TaFp $sl)) y tu TP ($(TaFp $tp)). Ciérrala con /cerrar $sym PRECIO." } catch {}
