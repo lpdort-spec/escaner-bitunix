@@ -13,6 +13,17 @@ function Resolve-OcrNumberNear([string]$raw, $ref) {      # el OCR a veces pierd
     $best = $null; $bd = 9.0; for ($k = 0; $k -lt $dg.Length; $k++) { $v = [double]$dg / [Math]::Pow(10, $k); if ($v -le 0) { continue }; $d = [Math]::Abs($v / [double]$ref - 1); if ($d -lt $bd) { $bd = $d; $best = $v } }
     if ($bd -lt 0.35) { return $best } else { return $null }
 }
+function Get-PnlAmounts([string]$txt) {      # importes entre paréntesis de "TP (+229.9368) / SL (-44.2232)": son el PYG en USDT si salta cada nivel; si el OCR pierde el punto (4 decimales fijos) se reinserta
+    $out = @(); foreach ($m in [regex]::Matches($txt, '\(\s*([+\-])\s*([0-9][0-9.,]*)\s*\)')) { $d = $m.Groups[2].Value; $v = $null
+        if ($d -match '[.,]') { $v = Convert-OcrNumber $d $false } elseif ($d.Length -gt 4) { $v = [double]($d.Substring(0, $d.Length - 4) + '.' + $d.Substring($d.Length - 4)) } else { $v = [double]('0.' + $d.PadLeft(4, '0')) }
+        if ($null -ne $v) { $out += $(if ($m.Groups[1].Value -eq '-') { - [double]$v } else { [double]$v }) } }
+    return $out
+}
+function Resolve-SlTpFromAmounts($m) {      # precio = entrada + importe / (lado x cantidad)
+    if ($m.entry -and $m.qty -and $m.side -and [double]$m.qty -gt 0) { $q = [double]$m.side * [double]$m.qty
+        if (-not $m.sl -and $null -ne $m.slAmt) { $px = [double]$m.entry + [double]$m.slAmt / $q; if ($px -gt 0) { $m.sl = [Math]::Round($px, 8); $m.notes = @($m.notes) + @("SL calculado con el importe que muestra Bitunix junto al TP/SL (no se leyó el precio): compruébalo") } }
+        if (-not $m.tp -and $null -ne $m.tpAmt) { $px = [double]$m.entry + [double]$m.tpAmt / $q; if ($px -gt 0) { $m.tp = [Math]::Round($px, 8); $m.notes = @($m.notes) + @("TP calculado con el importe que muestra Bitunix junto al TP/SL (no se leyó el precio): compruébalo") } } }
+}
 function Get-OcrCanon([string]$s) { return (($s.ToUpper() -replace '[1L\|]', 'I' -replace '[0Q]', 'O' -replace '5', 'S' -replace '8', 'B')) }
 function Resolve-OcrSymbol([string]$token, $symbols) {
     $c1 = Get-OcrCanon $token; $cands = @($c1); if ($c1.Length -gt 3) { $cands += $c1.Substring(1) }
@@ -60,6 +71,7 @@ function Read-PositionScreenshot([string]$path, [string]$captionSym) {      # va
             if ($z -ge 1 -and $z -le 150 -and [Math]::Abs($z - $near) / $near -lt 0.03) { $lvF = $near } }
         if ($lvF) { $merged.lev = $lvF; $merged.notes = @($merged.notes | Where-Object { $_ -notlike 'apalancamiento deducido del nocional*' }) }
         if ($merged.sym) { $merged.notes = @($merged.notes | Where-Object { $_ -ne 'no encuentro el símbolo' -and $_ -notlike 'no reconozco con seguridad el símbolo*' }) } }      # avisos de pasadas anteriores que ya se resolvieron
+    if ($merged -and -not $merged.error -and $merged.entry -and $merged.side -and $merged.qty) { Resolve-SlTpFromAmounts $merged }
     if ($merged -and -not $merged.error -and $merged.entry -and $merged.side -and $merged.levels -and -not ($merged.sl -or $merged.tp)) {
         if (@($merged.levels).Count -eq 2) { $merged.tp = [double]$merged.levels[0]; $merged.sl = [double]$merged.levels[1] }      # Bitunix muestra "TP/SL": con dos precios el primero es el TP y el segundo el SL (el SL puede estar ya en beneficio)
         else { foreach ($n in $merged.levels) { if ($merged.side * ($n - $merged.entry) -gt 0) { $merged.tp = $n } else { $merged.sl = $n } } } }
@@ -104,7 +116,7 @@ function Read-PositionOnce([string]$path, [string]$captionSym, [double]$sc0, [bo
     # SL / TP (fila bajo "Posición TP/SL": uno o dos precios; se quitan los importes entre paréntesis)
     if ($hTp) {
         $txt = (@($rows | Where-Object { $_.y -gt $hTp.y + 10 -and $_.y -lt $hTp.y + 80 -and $_.x -ge $hTp.x - 60 } | Sort-Object y, x | ForEach-Object { $_.t }) -join ' ')
-        $txt0 = $txt
+        $txt0 = $txt; $pa = @(Get-PnlAmounts $txt0); if ($pa.Count -ge 2) { $p.tpAmt = $pa[0]; $p.slAmt = $pa[1] }
         $clean = { param($s) $s -replace '\(?\s*[\$S]\s*[\d,\.]+\s*\)?', ' ' -replace '\([^)]*\)', ' ' }
         $txt = & $clean $txt
         $nums = @([regex]::Matches($txt, '\d+[\.,]\d{2,}') | ForEach-Object { Convert-OcrNumber $_.Value $false } | Where-Object { $_ -and ((-not $live) -or (& $near $_)) })

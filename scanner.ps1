@@ -52,6 +52,7 @@ if (Test-Path (Join-Path $PSScriptRoot "mesa-ballenas.ps1")) { . (Join-Path $PSS
 if (Test-Path (Join-Path $PSScriptRoot "tendencia-obs.ps1")) { . (Join-Path $PSScriptRoot "tendencia-obs.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "tendencia-v2-obs.ps1")) { . (Join-Path $PSScriptRoot "tendencia-v2-obs.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "movers-obs.ps1")) { . (Join-Path $PSScriptRoot "movers-obs.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "bandeja.ps1")) { . (Join-Path $PSScriptRoot "bandeja.ps1") }      # alta de operaciones del usuario desde bandeja-registros.jsonl (sin pasar por Telegram)
 if (Test-Path (Join-Path $PSScriptRoot "barrido-obs.ps1")) { . (Join-Path $PSScriptRoot "barrido-obs.ps1") }      # observación silenciosa: barrido de liquidez + desplazamiento + MSS en las 25 monedas con más volumen (22/10/2026)      # observación silenciosa: movers diarios >= +20 % (idea de Luis, 20/10/2026)      # observación silenciosa: ruptura larga + momentum con trailing (propuesta del 20/10/2026)
 if (Test-Path (Join-Path $PSScriptRoot "vix-aviso.ps1")) { . (Join-Path $PSScriptRoot "vix-aviso.ps1") }      # aviso del VIX en el nivel 19 (solo grupo Alertas Mercados)
 if (Test-Path (Join-Path $PSScriptRoot "limites-riesgo.ps1")) { . (Join-Path $PSScriptRoot "limites-riesgo.ps1") }      # límites de pérdida, reentradas y resumen semanal de tus operaciones (solo chat privado)
@@ -517,6 +518,7 @@ try { Import-ManualTrades (Join-Path $PSScriptRoot "operaciones-manuales.json") 
 try { Import-GroupTracking (Join-Path $PSScriptRoot "seguimiento-grupo.json") } catch {}      # tus operaciones reales entran en el seguimiento (solo se importan una vez)
 do {
     try { Update-Signals $base } catch {}
+    try { if (Get-Command Import-InboxRecords -ErrorAction SilentlyContinue) { Import-InboxRecords } } catch {}
     foreach ($iv in $Interval) { Scan $iv }
     try { Run-SweepObsIfDue } catch {}
     try { Send-MarketScanIfDue } catch {}
