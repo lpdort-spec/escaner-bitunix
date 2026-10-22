@@ -313,11 +313,14 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
         if ($chat -notin $allowedChats) { continue }
         $t = $m.text.Trim()
         if (-not $t.StartsWith("/")) {      # frases libres: solo en el chat privado de Luis; se traducen a /consulta o /ampliar por palabras clave (el bot no es una IA conversacional)
-            if (($script:PrivateChats -and $chat -notin $script:PrivateChats) -or -not (Get-Command Handle-FreeText -ErrorAction SilentlyContinue)) { continue }
+            $mapRx = '(?i)^\s*ma[po]a\s+(?:de\s+)?liquid(?:ez|aciones)(?:\s+(?:de\s+)?(?<c>[A-Za-z0-9]{2,12}))?(?:\s+(?<w>24h|3d|7d|30d))?\s*$'      # «mapa liquidez SQQQ»: vale en el privado y en los grupos permitidos (en cada chat se responde SOLO en ese chat)
+            if ($script:PrivateChats -and $chat -in $script:PrivateChats) { $mapRx = '(?i)^\s*(?:ma[po]a\s+(?:de\s+)?)?liquid(?:ez|aciones)(?:\s+(?:de\s+)?(?<c>[A-Za-z0-9]{2,12}))?(?:\s+(?<w>24h|3d|7d|30d))?\s*$' }      # en el privado también «liquidez ETH 7d» sin «mapa»
+            $isMap = ($t -match $mapRx) -and [bool](Get-Command Handle-Liquidez -ErrorAction SilentlyContinue); $mc = $Matches
+            if (-not $isMap -and (($script:PrivateChats -and $chat -notin $script:PrivateChats) -or -not (Get-Command Handle-FreeText -ErrorAction SilentlyContinue))) { continue }      # el resto de frases libres: solo en el chat privado
             $kf = "$chat"; if ($script:LastCmd[$kf] -and ((Get-Date) - $script:LastCmd[$kf]).TotalSeconds -lt 12) { Send-Tg $token $chat "Un momento, voy con una petición cada pocos segundos. Repite en unos segundos." $m.message_id; continue }
             $script:LastCmd[$kf] = Get-Date
-            if ($t -match '(?i)^\s*(?:ma[po]a\s+(?:de\s+)?)?liquid(?:ez|aciones)(?:\s+(?:de\s+)?(?<c>[A-Za-z0-9]{2,12}))?(?:\s+(?<w>24h|3d|7d|30d))?\s*$' -and (Get-Command Handle-Liquidez -ErrorAction SilentlyContinue)) {      # "mapa liquidez SQQ" / "liquidez ETH 7d": mismo mapa que /liquidez
-                $la = @(); if ($Matches['c']) { $la += $Matches['c'] }; if ($Matches['w']) { $la += $Matches['w'] }
+            if ($isMap) {      # "mapa liquidez SQQ" / "liquidez ETH 7d": mismo mapa que /liquidez
+                $la = @(); if ($mc['c']) { $la += $mc['c'] }; if ($mc['w']) { $la += $mc['w'] }
                 Send-Tg $token $chat "⏳ Calculando el mapa de liquidaciones estimado (unos segundos)..." $m.message_id
                 try { Handle-Liquidez $la $chat $token } catch { Send-Tg $token $chat "No he podido generar el mapa ahora: $($_.Exception.Message)" $null }
                 continue }
