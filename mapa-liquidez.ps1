@@ -40,14 +40,27 @@ function Get-LiqHeat($coin, $win) {
     for ($j = 0; $j -lt $nC; $j++) { for ($r = 0; $r -lt $nR; $r++) { $a = $heat[$j * $nR + $r] * 0.5; if ($r -gt 0) { $a += 0.25 * $heat[$j * $nR + $r - 1] }; if ($r -lt $nR - 1) { $a += 0.25 * $heat[$j * $nR + $r + 1] }; $sm[$j * $nR + $r] = $a } }
     return @{ coin = $coin; win = $win; nC = $nC; nR = $nR; pmin = $pmin; step = $step; heat = $sm; hi = $hi; lo = $lo; cl = $cl; tm = $tm; px = $cl[$nC - 1]; fuente = $fuente }
 }
-function Get-LiqPeaks($d) {      # mayores acumulaciones ESTIMADAS al final de la ventana, encima y debajo del precio
+function Get-LiqPeaks($d, [int]$nPick = 3) {      # mayores acumulaciones ESTIMADAS al final de la ventana, encima y debajo del precio
     $nR = $d.nR; $last = $d.nC - 1; $pr = [int][Math]::Floor(($d.px - $d.pmin) / $d.step); $vals = @()
     for ($r = 0; $r -lt $nR; $r++) { $sv = $d.heat[$last * $nR + $r]; if ($r -gt 0) { $sv += $d.heat[$last * $nR + $r - 1] }; if ($r -lt $nR - 1) { $sv += $d.heat[$last * $nR + $r + 1] }; $vals += , @($r, $sv) }
     $out = @{ up = @(); dn = @() }
     foreach ($side in @('up', 'dn')) { $cand = @($vals | Where-Object { if ($side -eq 'up') { $_[0] -gt $pr } else { $_[0] -lt $pr } } | Sort-Object { $_[1] } -Descending); $pick = @()
-        foreach ($c in $cand) { if ($c[1] -le 0) { break }; $far = $true; foreach ($p in $pick) { if ([Math]::Abs($p[0] - $c[0]) -lt 6) { $far = $false; break } }; if ($far) { $pick += , $c }; if ($pick.Count -ge 3) { break } }
+        foreach ($c in $cand) { if ($c[1] -le 0) { break }; $far = $true; foreach ($p in $pick) { if ([Math]::Abs($p[0] - $c[0]) -lt 6) { $far = $false; break } }; if ($far) { $pick += , $c }; if ($pick.Count -ge $nPick) { break } }
         $out[$side] = @($pick | ForEach-Object { $price = $d.pmin + ($_[0] + 0.5) * $d.step; @{ price = $price; pct = (($price / $d.px - 1) * 100); usd = $_[1] } }) }
     return $out
+}
+function Format-LiqUsd([double]$u) {      # volumen estimado en USDT con la unidad que toque: millones, miles o cientos
+    $c = [Globalization.CultureInfo]::GetCultureInfo('es-ES')
+    if ($u -ge 1e9) { return ($u / 1e9).ToString('N2', $c) + ' mil M USDT' }
+    if ($u -ge 1e6) { return ($u / 1e6).ToString('N2', $c) + ' M USDT' }
+    if ($u -ge 1e5) { return ($u / 1e3).ToString('N0', $c) + ' mil USDT' }
+    if ($u -ge 1e3) { return ($u / 1e3).ToString('N1', $c) + ' mil USDT' }
+    return $u.ToString('N0', $c) + ' USDT'
+}
+function Get-LiqBalance($d, [double]$pctRange) {      # volumen estimado total encima y debajo del precio dentro de +-pctRange %, al final de la ventana
+    $nR = $d.nR; $last = $d.nC - 1; $up = 0.0; $dn = 0.0
+    for ($r = 0; $r -lt $nR; $r++) { $price = $d.pmin + ($r + 0.5) * $d.step; $pc = ($price / $d.px - 1) * 100; if ([Math]::Abs($pc) -gt $pctRange) { continue }; $v = $d.heat[$last * $nR + $r]; if ($pc -gt 0) { $up += $v } else { $dn += $v } }
+    return @{ up = $up; dn = $dn }
 }
 function New-LiqImage($d, $path) {
     try { Add-Type -AssemblyName System.Drawing -ErrorAction Stop } catch { return $null }
@@ -88,9 +101,12 @@ function Handle-Liquidez($args1, $chat, $token) {
         $win = Get-LiqWin $w; $d = $null; try { $d = Get-LiqHeat $coin $win } catch { $d = $null }
         if (-not $d) { Send-Tg $token $chat "No he podido construir el mapa de $coin ($w): compruebo que sea un futuro de Bitunix con historial suficiente." $null; continue }
         $path = Join-Path ([IO.Path]::GetTempPath()) ("liq-" + [guid]::NewGuid().ToString('N') + ".png"); $img = New-LiqImage $d $path
-        $pk = Get-LiqPeaks $d
-        $fm = { param($lst) if (-not $lst.Count) { return "—" }; return (($lst | ForEach-Object { "{0} ({1:+0.0;-0.0}%, ≈{2:N0} M USD)" -f (TaFp $_.price), $_.pct, ($_.usd / 1e6) }) -join " · ") }
-        $txt = ("💧 MAPA DE LIQUIDACIONES ESTIMADO · {0}/USDT · {1} · precio {2}`nMayores acumulaciones estimadas:`n▲ Encima (liquidaciones de CORTOS): {3}`n▼ Debajo (liquidaciones de LARGOS): {4}`nModelo con {5}. No son datos reales de liquidaciones (eso solo lo dan los mapas de pago tipo Coinglass): úsalo como orientación de hacia dónde puede ir a buscar liquidez el precio, no como señal. Sin ventaja predictiva medida." -f $coin, $win.label, (TaFp $d.px), (& $fm $pk.up), (& $fm $pk.dn), $d.fuente)
+        $pk = Get-LiqPeaks $d 5
+        $lvl = { param($lst) if (-not @($lst).Count) { return "   (sin acumulaciones relevantes)" }; return ((@($lst) | Sort-Object { [Math]::Abs([double]$_.pct) } | ForEach-Object { "   {0,-12} {1,7}   ≈ {2}" -f (TaFp $_.price), ("{0:+0.0;-0.0}%" -f $_.pct), (Format-LiqUsd $_.usd) }) -join "`n") }
+        $b5 = Get-LiqBalance $d 5; $b10 = Get-LiqBalance $d 10
+        $bal = { param($b) $tot = $b.up + $b.dn; if ($tot -le 0) { return "sin datos" }; $big = if ($b.up -ge $b.dn) { "ENCIMA" } else { "DEBAJO" }; $rt = if ($b.up -ge $b.dn) { $b.up / [Math]::Max($b.dn, 1e-9) } else { $b.dn / [Math]::Max($b.up, 1e-9) }; return ("▲ {0} · ▼ {1} → más volumen {2} ({3:N1}×)" -f (Format-LiqUsd $b.up), (Format-LiqUsd $b.dn), $big, $rt) }
+        $read = ""; $tot5 = $b5.up + $b5.dn; if ($tot5 -gt 0) { if ($b5.up -ge 1.3 * $b5.dn) { $read = "Lectura orientativa: hay más liquidez estimada ENCIMA del precio (liquidaciones de cortos): el precio tiende a ser atraído hacia allí, y una subida puede acelerarse si la alcanza." } elseif ($b5.dn -ge 1.3 * $b5.up) { $read = "Lectura orientativa: hay más liquidez estimada DEBAJO del precio (liquidaciones de largos): el precio tiende a ser atraído hacia allí, y una caída puede acelerarse si la alcanza." } else { $read = "Lectura orientativa: el volumen estimado está equilibrado a ambos lados (sin imán claro)." } }
+        $txt = ("💧 MAPA DE LIQUIDACIONES ESTIMADO · {0}/USDT · {1}`n📍 Precio ahora: {2}`n`n▲ ENCIMA (liquidaciones de CORTOS) · volumen estimado por nivel:`n{3}`n`n▼ DEBAJO (liquidaciones de LARGOS) · volumen estimado por nivel:`n{4}`n`n⚖️ Balance dentro de ±5%: {5}`n⚖️ Balance dentro de ±10%: {6}`n{7}`n`nCifras en USDT (≈ dólares). Modelo con {8}: NO son datos reales de liquidaciones (eso solo lo dan los mapas de pago tipo Coinglass). Úsalo como orientación de hacia dónde puede ir a buscar liquidez el precio, no como señal; sin ventaja predictiva medida." -f $coin, $win.label, (TaFp $d.px), (& $lvl $pk.up), (& $lvl $pk.dn), (& $bal $b5), (& $bal $b10), $read, $d.fuente)
         if ($img) { $cap = ("{0}/USDT · mapa de liquidaciones estimado · {1}" -f $coin, $win.label); $ok = Send-TelegramPhoto $token $chat $img $cap; try { Remove-Item $img -Force } catch {}; if (-not $ok) { $txt = "(No he podido enviar la imagen.)`n" + $txt } } else { $txt = "(Este entorno no puede dibujar la imagen.)`n" + $txt }
         Send-Tg $token $chat $txt $null
     }
