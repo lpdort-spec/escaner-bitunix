@@ -1,13 +1,19 @@
 ﻿[
+    "METAUSDT-4h-1792670400000",
     {
         "value":  [
                       {
-                          "value":  "XMRUSDT-4h-1792497600000 ",
+                          "value":  " IRYSUSDT-1h-1792630800000",
                           "Count":  2
                       },
-                      "IRYSUSDT-1h-1792630800000"
+                      "EIGENUSDT-4h-1792641600000"
                   ],
         "Count":  2
     },
-    "EIGENUSDT-4h-1792641600000"
+    "SNXXUSDT-4h-1792670400000",
+    "MUUSDT-4h-1792670400000",
+    "SOXLUSDT-4h-1792670400000",
+    "AMDUSDT-4h-1792670400000",
+    "TQQQUSDT-4h-1792670400000",
+    "SNDKUSDT-4h-1792670400000"
 ]
