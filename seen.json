@@ -1,13 +1,13 @@
 ﻿[
     {
         "value":  [
-                      "XMRUSDT-4h-1792497600000",
                       {
-                          "value":  " ARIAUSDT-4h-1792310400000",
+                          "value":  "XMRUSDT-4h-1792497600000 ",
                           "Count":  2
-                      }
+                      },
+                      "IRYSUSDT-1h-1792630800000"
                   ],
         "Count":  2
     },
-    "IRYSUSDT-1h-1792630800000"
+    "EIGENUSDT-4h-1792641600000"
 ]
