@@ -51,7 +51,8 @@ if (Test-Path (Join-Path $PSScriptRoot "bollinger-obs.ps1")) { . (Join-Path $PSS
 if (Test-Path (Join-Path $PSScriptRoot "mesa-ballenas.ps1")) { . (Join-Path $PSScriptRoot "mesa-ballenas.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "tendencia-obs.ps1")) { . (Join-Path $PSScriptRoot "tendencia-obs.ps1") }
 if (Test-Path (Join-Path $PSScriptRoot "tendencia-v2-obs.ps1")) { . (Join-Path $PSScriptRoot "tendencia-v2-obs.ps1") }
-if (Test-Path (Join-Path $PSScriptRoot "movers-obs.ps1")) { . (Join-Path $PSScriptRoot "movers-obs.ps1") }      # observación silenciosa: movers diarios >= +20 % (idea de Luis, 20/10/2026)      # observación silenciosa: ruptura larga + momentum con trailing (propuesta del 20/10/2026)
+if (Test-Path (Join-Path $PSScriptRoot "movers-obs.ps1")) { . (Join-Path $PSScriptRoot "movers-obs.ps1") }
+if (Test-Path (Join-Path $PSScriptRoot "barrido-obs.ps1")) { . (Join-Path $PSScriptRoot "barrido-obs.ps1") }      # observación silenciosa: barrido de liquidez + desplazamiento + MSS en las 25 monedas con más volumen (22/10/2026)      # observación silenciosa: movers diarios >= +20 % (idea de Luis, 20/10/2026)      # observación silenciosa: ruptura larga + momentum con trailing (propuesta del 20/10/2026)
 if (Test-Path (Join-Path $PSScriptRoot "vix-aviso.ps1")) { . (Join-Path $PSScriptRoot "vix-aviso.ps1") }      # aviso del VIX en el nivel 19 (solo grupo Alertas Mercados)
 if (Test-Path (Join-Path $PSScriptRoot "limites-riesgo.ps1")) { . (Join-Path $PSScriptRoot "limites-riesgo.ps1") }      # límites de pérdida, reentradas y resumen semanal de tus operaciones (solo chat privado)
 if (Test-Path (Join-Path $PSScriptRoot "datos-mercado.ps1")) { . (Join-Path $PSScriptRoot "datos-mercado.ps1") }
@@ -530,6 +531,7 @@ do {
     try { Run-TendenciaObsIfDue } catch {}
     try { if (Get-Command Run-TendenciaV2ObsIfDue -ErrorAction SilentlyContinue) { Run-TendenciaV2ObsIfDue } } catch {}
     try { if (Get-Command Run-MoversObsIfDue -ErrorAction SilentlyContinue) { Run-MoversObsIfDue } } catch {}
+    try { if (Get-Command Run-BarridoObsIfDue -ErrorAction SilentlyContinue) { Run-BarridoObsIfDue } } catch {}
     try { if (Get-Command Run-DatosMercadoIfDue -ErrorAction SilentlyContinue) { Run-DatosMercadoIfDue } } catch {}      # recolector horario de posicionamiento (solo para medir)
     try { Notify-GroupTracking } catch {}
     try { Check-SignalHealth } catch {}
