@@ -172,7 +172,7 @@ $script:HelpText = @"
 /opinion LARGO|CORTO SIMBOLO [PRECIO] · te doy mi opinión sobre una idea (sin SL, TP ni apalancamiento; no es una alerta). Ej.: /opinion largo BTC 85500 · /opinion corto TSLA 250
 /traders [SIMBOLO] · posicionamiento de los mejores traders: BTC y ETH sin argumentos; también cripto o acciones de EE. UU. (ej.: /traders TSLA)
 /ballenas [MONEDA] · posiciones de las mayores carteras de Hyperliquid (únicas públicas): cuánto hay en largo y en corto y las mayores posiciones. Ej.: /ballenas BTC
-/liquidez [MONEDA] [24h|3d|7d|30d] · mapa de calor de liquidaciones ESTIMADO (imagen estilo Coinglass; modelo con interés abierto, no datos reales). Sin argumentos: BTC en 24h y 3d. Ej.: /liquidez ETH 7d
+/liquidez [MONEDA] [24h|3d|7d|30d] · mapa de calor de liquidaciones ESTIMADO (imagen estilo Coinglass; modelo con interés abierto, no datos reales). Sin argumentos: BTC en 24h y 3d. Ej.: /liquidez ETH 7d. También puedes escribir «mapa liquidez SQQQ» (o «mapa liquidez ETH 7d»); si pones SQQ y solo existe SQQQ, uso ese
 /ayuda · esta ayuda
 /id · muestra el identificador del chat
 
@@ -316,6 +316,11 @@ function Handle-Commands($token, $allowedChats, $offsetFile) {
             if (($script:PrivateChats -and $chat -notin $script:PrivateChats) -or -not (Get-Command Handle-FreeText -ErrorAction SilentlyContinue)) { continue }
             $kf = "$chat"; if ($script:LastCmd[$kf] -and ((Get-Date) - $script:LastCmd[$kf]).TotalSeconds -lt 12) { Send-Tg $token $chat "Un momento, voy con una petición cada pocos segundos. Repite en unos segundos." $m.message_id; continue }
             $script:LastCmd[$kf] = Get-Date
+            if ($t -match '(?i)^\s*(?:ma[po]a\s+(?:de\s+)?)?liquid(?:ez|aciones)(?:\s+(?:de\s+)?(?<c>[A-Za-z0-9]{2,12}))?(?:\s+(?<w>24h|3d|7d|30d))?\s*$' -and (Get-Command Handle-Liquidez -ErrorAction SilentlyContinue)) {      # "mapa liquidez SQQ" / "liquidez ETH 7d": mismo mapa que /liquidez
+                $la = @(); if ($Matches['c']) { $la += $Matches['c'] }; if ($Matches['w']) { $la += $Matches['w'] }
+                Send-Tg $token $chat "⏳ Calculando el mapa de liquidaciones estimado (unos segundos)..." $m.message_id
+                try { Handle-Liquidez $la $chat $token } catch { Send-Tg $token $chat "No he podido generar el mapa ahora: $($_.Exception.Message)" $null }
+                continue }
             Send-Tg $token $chat "⏳ Un momento, lo miro..." $m.message_id
             $rep = try { Handle-FreeText $t } catch { "No he podido completar la consulta ahora: $($_.Exception.Message)" }
             if ($rep) { Send-Tg $token $chat $rep $null }; continue

@@ -7,6 +7,9 @@ function Get-MadridNow {
 }
 
 # ---------- Configuración de disciplina (limites.json): capital, margen por posición y límites de pérdida como % del capital ----------
+function Get-DesdeEpoch {      # punto de partida de la contabilidad (22/10/2026, capital 320): limites.json "desde" (epoch s); lo anterior no cuenta para límites, resumen ni vigilancia
+    try { $f = Join-Path $PSScriptRoot "limites.json"; if (Test-Path $f) { $c = Get-Content $f -Raw -Encoding UTF8 | ConvertFrom-Json; if ($c.desde) { return [long]$c.desde } } } catch {}; return 0L
+}
 function Get-LimConfig {
     $c = @{ capital = 450.0; margen = 75.0; pctDia = 5.0; pctSemana = 10.0 }
     try { $j = Get-Content (Join-Path $PSScriptRoot "limites.json") -Raw -Encoding UTF8 | ConvertFrom-Json; foreach ($k in 'capital', 'margen', 'pctDia', 'pctSemana') { if ($null -ne $j.$k -and [double]$j.$k -gt 0) { $c[$k] = [double]$j.$k } } } catch {}
@@ -196,7 +199,7 @@ function Format-SummaryLine($r, $px, [bool]$mine) {
 }
 function Get-CompactSummary {
     $now = Get-MadridNow; $all = @(Read-Signals); $since = [DateTimeOffset]::UtcNow.AddHours(-24).ToUnixTimeSeconds()
-    $mineOpen = @($all | Where-Object { ($_.strat -eq 'tomada' -or $_.manual -eq $true) -and $_.status -in 'open', 'pending' })
+    $desde0 = Get-DesdeEpoch; $mineOpen = @($all | Where-Object { ($_.strat -eq 'tomada' -or $_.manual -eq $true) -and $_.status -in 'open', 'pending' -and [long]$_.time -ge $desde0 })
     $mineOpen = @($mineOpen | Group-Object sym | ForEach-Object { $_.Group | Sort-Object { if ($_.strat -eq 'tomada') { 0 } else { 1 } } | Select-Object -First 1 })      # una línea por moneda (si hay registro vivo y manual, el vivo)
     $mineClosed = @()      # desde 16/10/2026 el resumen NO informa de operaciones cerradas (petición de Luis): solo las que siguen en marcha
     $trk = @($all | Where-Object { $_.strat -in 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'seg-priv', 'arranque' -and $_.manual -ne $true -and $_.status -in 'open', 'pending' } | Sort-Object { [long]$_.time } -Descending)

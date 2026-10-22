@@ -74,9 +74,16 @@ function New-LiqImage($d, $path) {
     $g.DrawString("Más claro = más liquidaciones estimadas · modelo con " + $d.fuente, $font, $gray, 14, 30)
     $g.Dispose(); $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose(); return $path
 }
+function Resolve-LiqCoin([string]$coin) {      # "SQQ" -> "SQQQ": si no es un futuro exacto de Bitunix, se toma el de más volumen cuyo nombre empieza por lo escrito
+    try { $tk = @((Invoke-RestMethod "$($script:CmdBase)/tickers" -TimeoutSec 20).data | Where-Object { $_.symbol -like '*USDT' }); $bases = @($tk | ForEach-Object { $_.symbol -replace 'USDT$', '' })
+        if ($coin -in $bases) { return $coin }
+        $c = @($tk | Where-Object { ($_.symbol -replace 'USDT$', '').StartsWith($coin) } | Sort-Object { [double]$_.quoteVol } -Descending); if ($c.Count) { return ($c[0].symbol -replace 'USDT$', '') } } catch {}
+    return $coin
+}
 function Handle-Liquidez($args1, $chat, $token) {
     $coin = 'BTC'; $wins = @('24h', '3d')
     foreach ($w in @($args1)) { $s = "$w".Trim(); if (-not $s) { continue }; if (Get-LiqWin $s) { $wins = @($s) } else { $coin = ($s -replace 'USDT$', '' -replace '[^A-Za-z0-9]', '').ToUpper() } }
+    $coin = Resolve-LiqCoin $coin
     foreach ($w in $wins) {
         $win = Get-LiqWin $w; $d = $null; try { $d = Get-LiqHeat $coin $win } catch { $d = $null }
         if (-not $d) { Send-Tg $token $chat "No he podido construir el mapa de $coin ($w): compruebo que sea un futuro de Bitunix con historial suficiente." $null; continue }

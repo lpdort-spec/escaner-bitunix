@@ -168,7 +168,7 @@ function Review-OpenPositions {
     $slot = [long][Math]::Floor([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() / 14400); if ($slot -eq $script:RpSlot) { return }; $script:RpSlot = $slot
     $mem = @{}; foreach ($kv in ((Get-ReportState "ajustes") -split ',' | Where-Object { $_ -match '=' })) { $p = $kv -split '=', 2; $mem[$p[0]] = $p[1] }
     $tk = $null; $chg = $false
-    foreach ($s in @(Read-Signals | Where-Object { $_.status -eq 'open' -and $_.strat -in 'seg-priv', 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'tomada' -and -not ($_.strat -eq 'tomada' -and $_.origen -eq 'operacion') })) {
+    $desde0 = Get-DesdeEpoch; foreach ($s in @(Read-Signals | Where-Object { $_.status -eq 'open' -and $_.strat -in 'seg-priv', 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'tomada' -and -not ($_.strat -eq 'tomada' -and $_.origen -eq 'operacion') -and ($_.strat -ne 'tomada' -or [long]$_.time -ge $desde0) })) {
         try {
             if ($s.strat -ne 'tomada' -and $s.manual -ne $true -and -not (Test-SignalOldEnough $s)) { continue }      # una señal recién emitida no se "gestiona" hasta que pasen dos velas
             $dest = Get-RecDest $s; $dest = @{ priv = $dest.priv; group = $false }      # los ajustes de SL/TP y la protección por noticias son solo para el chat privado; al grupo solo van señales, resultados y avisos de cerrar

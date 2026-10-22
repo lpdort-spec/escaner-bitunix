@@ -8,6 +8,11 @@ function Convert-OcrNumber([string]$s, [bool]$allowNoDot = $true) {
     elseif ($x -notmatch '\.') { if ($allowNoDot -and $x.Length -ge 3 -and $x.StartsWith('0')) { $x = '0.' + $x.Substring(1) } else { return $null } }
     $d = 0.0; if ([double]::TryParse($x, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$d)) { return $d } else { return $null }
 }
+function Resolve-OcrNumberNear([string]$raw, $ref) {      # el OCR a veces pierde el punto decimal ("81,1420" por "81,142.0"): con los dígitos se prueba cada posición del punto y se elige el valor más cercano al precio de referencia (<= 35 %)
+    $dg = ("$raw" -replace '[^0-9]', ''); if (-not $dg -or -not $ref -or [double]$ref -le 0 -or $dg.Length -gt 15) { return $null }
+    $best = $null; $bd = 9.0; for ($k = 0; $k -lt $dg.Length; $k++) { $v = [double]$dg / [Math]::Pow(10, $k); if ($v -le 0) { continue }; $d = [Math]::Abs($v / [double]$ref - 1); if ($d -lt $bd) { $bd = $d; $best = $v } }
+    if ($bd -lt 0.35) { return $best } else { return $null }
+}
 function Get-OcrCanon([string]$s) { return (($s.ToUpper() -replace '[1L\|]', 'I' -replace '[0Q]', 'O' -replace '5', 'S' -replace '8', 'B')) }
 function Resolve-OcrSymbol([string]$token, $symbols) {
     $c1 = Get-OcrCanon $token; $cands = @($c1); if ($c1.Length -gt 3) { $cands += $c1.Substring(1) }
@@ -45,6 +50,9 @@ function Read-PositionScreenshot([string]$path, [string]$captionSym) {      # va
     # apalancamiento definitivo tras juntar las pasadas: etiqueta "7X" > cantidad x ENTRADA / margen > nocional marcado / margen (el nocional a precio marcado da un apalancamiento menor del real cuando el precio se ha movido)
     if ($merged -and -not $merged.error -and -not $merged.side -and $merged.liq -and $merged.entry) { $merged.side = $(if ($merged.liq -gt $merged.entry) { -1 } else { 1 }); $merged.notes = @($merged.notes) + @("lado deducido de la liquidación (por encima de la entrada = corto)") }
     if ($merged -and -not $merged.error -and -not $merged.side -and $merged.mark -and $merged.entry -and $merged.mark -ne $merged.entry -and $null -ne $merged.pnlNeg -and $merged.pnl) { $up2 = ($merged.mark -gt $merged.entry); $merged.side = $(if (($up2 -and -not $merged.pnlNeg) -or (-not $up2 -and $merged.pnlNeg)) { 1 } else { -1 }); $merged.notes = @($merged.notes) + @("lado deducido del signo del PYG frente al precio marcado") }
+    if ($merged -and -not $merged.error -and -not $merged.entry -and $merged.mark -and $merged.qty -and $merged.pnl -and $merged.side) {      # entrada = marcado - lado x PYG / cantidad (el PYG no realizado ya incluye el signo)
+        $sp = $(if ($merged.pnlNeg) { - [double]$merged.pnl } else { [double]$merged.pnl }); $e2 = [double]$merged.mark - [double]$merged.side * $sp / [double]$merged.qty
+        if ($e2 -gt 0) { $merged.entry = [Math]::Round($e2, 8); $merged.notes = @($merged.notes) + @("entrada calculada con el PYG, la cantidad y el precio marcado (no se leyó): compruébala") } }
     if ($merged -and -not $merged.error) { $lvF = $null
         if ($merged.levLabel) { $lvF = [double]$merged.levLabel }
         elseif ($merged.qty -and $merged.entry -and $merged.margin -and $merged.margin -gt 0) { $z = $merged.qty * $merged.entry / $merged.margin
@@ -85,8 +93,8 @@ function Read-PositionOnce([string]$path, [string]$captionSym, [double]$sc0, [bo
     $near = { param($v) $v -and $live -gt 0 -and [Math]::Abs($v / $live - 1) -lt 0.35 }
     # columnas por cabecera
     $hEntry = & $find '(?i)precio de entrada'; $hMark = & $find '(?i)precio marcado'; $hMargin = & $find '(?i)^margen'; $hLiq = & $find '(?i)liq'; $hPnl = & $find '(?i)no realizado'; $hTp = & $find '(?i)posici.n\s*TP'; $hPos = @($rows | Where-Object { $_.t -match '(?i)^posici.n\s*$' } | Select-Object -First 1)[0]
-    $v = & $below $hEntry; if ($v) { $n = Convert-OcrNumber (($v.t -split '\s+')[0]); if ($n -and (-not $live -or (& $near $n))) { $p.entry = $n } }
-    $v = & $below $hMark; if ($v) { $n = Convert-OcrNumber (($v.t -split '\s+')[0]); if ($n) { $p.mark = $n } }
+    $v = & $below $hEntry; if ($v) { $tk0 = ($v.t -split '\s+')[0]; $n = Convert-OcrNumber $tk0; if (-not ($n -and (-not $live -or (& $near $n)))) { $n2 = $null; if ($live) { $n2 = Resolve-OcrNumberNear $tk0 $live }; if ($n2) { $n = $n2; $p.notes += "entrada reconstruida de '$tk0' (el OCR perdió el punto decimal): compruébala" } else { $n = $null } }; if ($n) { $p.entry = $n } }
+    $v = & $below $hMark; if ($v) { $tk1 = ($v.t -split '\s+')[0]; $n = Convert-OcrNumber $tk1; if ($live -and -not (& $near $n)) { $n3 = Resolve-OcrNumberNear $tk1 $live; if ($n3) { $n = $n3 } }; if ($n) { $p.mark = $n } }
     $v = & $below $hMargin; if ($v) { $n = Convert-OcrNumber (($v.t -split '\s+')[0]) $false; if ($n) { $p.margin = $n } }
     $v = & $below $hLiq; if ($v) { $n = Convert-OcrNumber (($v.t -split '\s+')[0]); if ($n) { $p.liq = $n } }
     $v = & $below $hPnl 120; if ($v) { $p.pnlNeg = ($v.t -match '^\s*-'); $m1 = [regex]::Match($v.t, '[+-]?\d+[\.,]\d+'); if ($m1.Success) { $p.pnl = (Convert-OcrNumber $m1.Value $false) } }
@@ -165,7 +173,10 @@ function Format-CapturaAnalysis($p, [bool]$register, [string]$who) {
     try { if (Get-Command Get-MultiTfLine -ErrorAction SilentlyContinue) { $mt = Get-MultiTfLine $sg $sym $px; if ($mt) { $L += $mt } } } catch {}      # 15m, 1h, 4h, 1D, 1S y 1M frente a tu dirección
     # veredicto con reglas fijas
     $L += ""; $verdict = "MANTENER"; $why = @(); $inProfit = $false
-    if (-not $sl) {
+    if (-not $sl -and $p.card) {
+        $dsug = if ($lev -and $lev -gt 0) { $en * (Get-SlMaxPct) / 100 / $lev } else { [Math]::Max(1.2 * $atr, 0.02 * $en) }
+        $verdict = "MANTENER"; $why += ("la tarjeta no muestra tu SL: confirma que lo tienes puesto (con tu regla del {0:N0}% del margen sería {1})" -f (Get-SlMaxPct), (TaFp ($en - $sg * $dsug))) }
+    elseif (-not $sl) {
         $dsug = if ($lev -and $lev -gt 0) { $en * (Get-SlMaxPct) / 100 / $lev } else { [Math]::Max(1.2 * $atr, 0.02 * $en) }
         $liqTxt = if ($p.liq) { " (liquidación a {0:N1}% del precio)" -f ([Math]::Abs($px - $p.liq) / $px * 100) } else { "" }
         $ruido = if ($lev -and $atr -gt 0) { "; es lo que cuesta el {0:N0}% del margen con x{1}: si queda dentro del ruido normal (ATR 4h {2:N1}%), baja el apalancamiento" -f (Get-SlMaxPct), $lev, ($atr / $px * 100) } else { "" }
@@ -295,10 +306,27 @@ function Handle-Screenshot($token, $m, $chat) {
         return (Get-OnePositionReport $tmp $capSym $m)
     } finally { try { Remove-Item $tmp -Force -ErrorAction SilentlyContinue } catch {} }
 }
+function Read-ShareCard([string]$path) {      # tarjeta "compartir" de Bitunix (símbolo, Largo|30X, ROI, precio de entrada y actual, fecha): no trae margen, SL, TP ni liquidación
+    $rows = $null; foreach ($cfg in @(@(3, $true), @(2, $true), @(4, $false))) { $r0 = Get-ImageOcrRows $path $cfg[0] $cfg[1]; if ($null -eq $r0) { return $null }; $rows = $r0; $txt0 = (@($r0 | ForEach-Object { $_.t }) -join ' '); if ($txt0 -match '(?i)\bROI\b' -and $txt0 -match '(?i)entrada' -and $txt0 -match '(?i)actual') { break } }
+    $txt = (@($rows | ForEach-Object { $_.t }) -join ' '); if (-not ($txt -match '(?i)\bROI\b' -and $txt -match '(?i)entrada' -and $txt -match '(?i)actual')) { return $null }
+    $tick = @((Invoke-RestMethod "$($script:CmdBase)/tickers" -TimeoutSec 20).data); $bases = @($tick | ForEach-Object { $_.symbol -replace 'USDT$', '' })
+    $p = @{ card = $true; notes = @("tarjeta de ROI de Bitunix: no muestra margen, SL, TP ni liquidación; con una captura de la tabla de Posiciones (con la columna TP/SL) puedo vigilarla y registrarla") }
+    if ($txt -match '(?<![0-9.,A-Za-z])([A-Z][A-Z0-9]{1,11})\s*USDT') { $rs = Resolve-OcrSymbol $Matches[1] $bases; if ($rs.ok) { $p.sym = $rs.sym } else { $p.notes += "no reconozco con seguridad el símbolo (leído '$($Matches[1])')" } }
+    if ($txt -match '(?i)\b(largo|long)\b') { $p.side = 1 } elseif ($txt -match '(?i)\b(corto|short)\b') { $p.side = -1 }
+    if ($txt -match '(?i)(?<![\d.,])(\d{1,3})\s*[xX](?![A-Za-z0-9])') { $lv = [double]$Matches[1]; if ($lv -ge 1 -and $lv -le 150) { $p.levLabel = $lv; $p.lev = $lv } }
+    $live = $null; if ($p.sym) { $live = [double]($tick | Where-Object symbol -eq "$($p.sym)USDT" | Select-Object -First 1).lastPrice; $p.live = $live }
+    $numNear = { param($tok) $n = Convert-OcrNumber $tok; if ($live -and -not ($n -and [Math]::Abs($n / $live - 1) -lt 0.35)) { $n2 = Resolve-OcrNumberNear $tok $live; if ($n2) { $n = $n2 } }; $n }
+    if ($txt -match '(?i)entrada\s*:?\s*([0-9][0-9.,]*)') { $p.entry = & $numNear $Matches[1] }
+    if ($txt -match '(?i)actual\s*:?\s*([0-9][0-9.,]*)') { $p.mark = & $numNear $Matches[1] }
+    if ($txt -match '(?i)ROI\s*([+\-]?\s*[0-9]+[.,][0-9]+)\s*%?') { $p.roi = ($Matches[1] -replace '\s', '') }
+    if (-not $p.side -and $p.entry -and $p.mark -and $p.roi) { $up = ($p.mark -gt $p.entry); $neg = ($p.roi -match '^-'); $p.side = $(if (($up -and -not $neg) -or (-not $up -and $neg)) { 1 } else { -1 }); $p.notes += "lado deducido del signo del ROI" }
+    return $p
+}
 function Get-OnePositionReport([string]$tmp, $capSym, $m) {
         $p = Read-PositionScreenshot $tmp $capSym
         if ($p.error) { return "⚠️ $($p.error) Mándame los datos con /operacion PAR LARGO|CORTO ENTRADA SL TP MARGEN APALANCAMIENTO." }
         $miss = @(); foreach ($k in 'sym', 'entry', 'side') { if (-not $p.$k) { $miss += $k } }
+        if ($miss.Count) { try { $card = Read-ShareCard $tmp; if ($card) { $p = $card; $miss = @(); foreach ($k in 'sym', 'entry', 'side') { if (-not $p.$k) { $miss += $k } } } } catch {} }      # tarjeta de ROI de Bitunix (otro formato)
         if ($miss.Count) {
             $got = @(); foreach ($k in 'sym', 'entry', 'mark', 'margin', 'liq', 'sl', 'tp', 'lev') { if ($p.$k) { $got += "$k=$($p.$k)" } }
             $fv = { param($x, $ph) if ($x) { ("$x" -replace '\.', ',') } else { $ph } }

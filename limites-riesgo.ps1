@@ -2,7 +2,7 @@
 # en las 2 horas siguientes a cerrar con pérdida, y resumen semanal de sus operaciones. Se calcula con las operaciones CERRADAS que el bot conoce (las que registras con /operacion, /cerrar o capturas de cierre).
 $script:ReentradaMin = 120
 function Get-MisCerradas {
-    return @(Read-Signals | Where-Object { $_.manual -eq $true -and $_.status -eq 'closed' -and $_.closedAt -and $null -ne $_.pnlUsd })
+    $d0 = Get-DesdeEpoch; return @(Read-Signals | Where-Object { $_.manual -eq $true -and $_.status -eq 'closed' -and $_.closedAt -and $null -ne $_.pnlUsd -and [long]$_.closedAt -ge $d0 })
 }
 function Get-LimitesStatus {      # PnL realizado hoy y en la semana (lunes a domingo, hora de España)
     $now = Get-MadridNow; $hoy = $now.Date; $lunes = $hoy.AddDays( - (([int]$now.DayOfWeek + 6) % 7)); $dia = 0.0; $sem = 0.0; $nd = 0; $ns = 0

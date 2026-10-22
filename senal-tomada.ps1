@@ -124,7 +124,7 @@ function Add-LiveOrder($sym, [int]$sg, [double]$en, [double]$sl, [double]$tp, [d
 function Watch-TakenOrders {
     if (-not $TelegramToken) { return }
     if (((Get-Date) - $script:tomAt).TotalSeconds -lt 40) { return }; $script:tomAt = Get-Date
-    $sigs = @(Read-Signals); $open = @($sigs | Where-Object { $_.strat -eq 'tomada' -and $_.status -eq 'open' }); if (-not $open.Count) { return }
+    $sigs = @(Read-Signals); $desde0 = Get-DesdeEpoch; $open = @($sigs | Where-Object { $_.strat -eq 'tomada' -and $_.status -eq 'open' -and [long]$_.time -ge $desde0 }); if (-not $open.Count) { return }
     $dirty = $false; $tk = $null; $nowS = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     foreach ($s in $open) {
         try {
