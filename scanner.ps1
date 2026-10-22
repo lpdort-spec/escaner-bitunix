@@ -7,6 +7,7 @@ param(
     [double]$VolMult = 2.0,         # volumen de la vela >= X veces la media de las 20 anteriores
     [int]$Lookback = 20,            # velas del rango cuya liquidez se rompe o barre
     [double]$MaxExt = 1.2,          # ruptura: máximo alejamiento del nivel en ATR (si no, ya es tarde)
+    [double]$MaxRun24 = 0.25,       # ruptura: no se emite si el precio ya ha corrido >= 25% en las últimas 24 velas (extendido: estilo IRYS 22/10/2026; backtest 1h/4h largos con banda abierta y corrida >= 25%: -0,08 a -0,12R). 0 = sin filtro
     [double]$MaxAgeFactor = 1.5,    # solo avisa si la vela cerró hace <= X veces su duración
     [string[]]$Strategies = @("ruptura"),
     [double]$MinSlPct = 1.0,        # SL mínimo en % del precio (las comisiones se comen los SL pequeños)
@@ -267,7 +268,8 @@ function Scan($iv) {
                 if ($side) {
                     $sg = if ($side -eq "LONG") { 1 } else { -1 }
                     $ext = $sg * ($px - $level) / $atr
-                    if ($ext -gt $MaxExt -or $rng -gt 2.5 * $atr) { $side = $null; $rej.tarde++ }
+                    $run24 = 0.0; try { $w24 = @($closed[([Math]::Max(0, $n - 24))..($n - 1)]); if ($side -eq "LONG") { $mn24 = ($w24 | ForEach-Object { [double]$_.low } | Measure-Object -Minimum).Minimum; if ($mn24 -gt 0) { $run24 = $px / $mn24 - 1 } } else { $mx24 = ($w24 | ForEach-Object { [double]$_.high } | Measure-Object -Maximum).Maximum; if ($px -gt 0) { $run24 = $mx24 / $px - 1 } } } catch {}
+                    if ($ext -gt $MaxExt -or $rng -gt 2.5 * $atr -or ($MaxRun24 -gt 0 -and $run24 -ge $MaxRun24)) { $side = $null; $rej.tarde++ }
                     else {
                         $strat = "ruptura"; $sl = $level - $sg * 0.5 * $atr
                         $rk = $sg * ($px - $sl); if ($rk -lt 0.8 * $atr) { $sl = $px - $sg * 0.8 * $atr }; if ($rk -gt 2.0 * $atr) { $sl = $px - $sg * 2.0 * $atr }
