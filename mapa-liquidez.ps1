@@ -23,7 +23,7 @@ function Get-LiqHeat($coin, $win) {
     } catch { $oi = $null }
     $cum = New-Object 'double[]' $nC; $cum[0] = 1.0
     for ($q = 1; $q -lt $nC; $q++) { $f = 1.0; if ($oi -and $oi[$q - 1] -gt 0 -and $oi[$q] -lt $oi[$q - 1]) { $f = $oi[$q] / $oi[$q - 1] }; $cum[$q] = $cum[$q - 1] * $f }
-    $pmin = ($lo | Measure-Object -Minimum).Minimum * 0.985; $pmax = ($hi | Measure-Object -Maximum).Maximum * 1.015; $nR = 140; $step = ($pmax - $pmin) / $nR
+    $pxN = $cl[$nC - 1]; $pmin = [Math]::Min(($lo | Measure-Object -Minimum).Minimum * 0.985, $pxN * 0.80); $pmax = [Math]::Max(($hi | Measure-Object -Maximum).Maximum * 1.015, $pxN * 1.20); $nR = 200; $step = ($pmax - $pmin) / $nR
     $heat = New-Object 'double[]' ($nC * $nR)
     $tiers = @(@(5, 0.10), @(10, 0.25), @(25, 0.30), @(50, 0.20), @(100, 0.15))
     for ($q = 1; $q -lt $nC; $q++) {
@@ -57,6 +57,7 @@ function Format-LiqUsd([double]$u) {      # volumen estimado en USDT con la unid
     if ($u -ge 1e3) { return ($u / 1e3).ToString('N1', $c) + ' mil USDT' }
     return $u.ToString('N0', $c) + ' USDT'
 }
+function Format-LiqShort([double]$u) { $c = [Globalization.CultureInfo]::GetCultureInfo('es-ES'); if ($u -ge 1e9) { return ($u / 1e9).ToString('N2', $c) + ' mil M' }; if ($u -ge 1e6) { return ($u / 1e6).ToString('N1', $c) + ' M' }; if ($u -ge 1e3) { return ($u / 1e3).ToString('N0', $c) + ' mil' }; return $u.ToString('N0', $c) }
 function Get-LiqBalance($d, [double]$pctRange) {      # volumen estimado total encima y debajo del precio dentro de +-pctRange %, al final de la ventana
     $nR = $d.nR; $last = $d.nC - 1; $up = 0.0; $dn = 0.0
     for ($r = 0; $r -lt $nR; $r++) { $price = $d.pmin + ($r + 0.5) * $d.step; $pc = ($price / $d.px - 1) * 100; if ([Math]::Abs($pc) -gt $pctRange) { continue }; $v = $d.heat[$last * $nR + $r]; if ($pc -gt 0) { $up += $v } else { $dn += $v } }
@@ -64,7 +65,7 @@ function Get-LiqBalance($d, [double]$pctRange) {      # volumen estimado total e
 }
 function New-LiqImage($d, $path) {
     try { Add-Type -AssemblyName System.Drawing -ErrorAction Stop } catch { return $null }
-    $W0 = 1000; $H0 = 560; $x0 = 14; $x1 = $W0 - 78; $y0 = 46; $y1 = $H0 - 26
+    $W0 = 1250; $H0 = 680; $x0 = 14; $x1 = $W0 - 330; $y0 = 46; $y1 = $H0 - 26
     $bmp = New-Object System.Drawing.Bitmap $W0, $H0; $g = [System.Drawing.Graphics]::FromImage($bmp); $g.SmoothingMode = 'AntiAlias'
     $g.Clear([System.Drawing.ColorTranslator]::FromHtml('#0b0f1a'))
     $stops = @(@(0.0, 38, 10, 70), @(0.25, 58, 76, 160), @(0.5, 32, 150, 155), @(0.75, 90, 200, 100), @(1.0, 253, 231, 37))
@@ -83,6 +84,16 @@ function New-LiqImage($d, $path) {
     $yp = $y1 - ($d.px - $d.pmin) / ($d.step * $d.nR) * ($y1 - $y0); $g.FillRectangle([System.Drawing.Brushes]::White, [single]$x1, [single]($yp - 8), 74, 16); $g.DrawString((TaFp $d.px), $font, [System.Drawing.Brushes]::Black, [single]($x1 + 3), [single]($yp - 8))
     $tz = $null; try { $tz = [TimeZoneInfo]::FindSystemTimeZoneById('Romance Standard Time') } catch {}
     foreach ($j in @(0, [int]($d.nC / 2), ($d.nC - 1))) { $dt = [DateTimeOffset]::FromUnixTimeMilliseconds($d.tm[$j]); if ($tz) { $dt = [TimeZoneInfo]::ConvertTime($dt, $tz) }; $tx = [Math]::Min($x1 - 70, [Math]::Max($x0, $x0 + $j * $cw - 30)); $g.DrawString($dt.ToString('dd/MM HH:mm'), $font, $gray, [single]$tx, [single]($y1 + 4)) }
+    # perfil de volumen estimado ACTUAL por nivel (barras a la derecha) y niveles mayores con su cifra
+    $xp0 = $x1 + 84; $xpw = $W0 - 10 - $xp0; $last = $d.nC - 1; $pr = ($d.px - $d.pmin) / $d.step; $prof = New-Object 'double[]' $d.nR; $pm = 0.0
+    for ($r = 0; $r -lt $d.nR; $r++) { $prof[$r] = $d.heat[$last * $d.nR + $r]; if ($prof[$r] -gt $pm) { $pm = $prof[$r] } }
+    if ($pm -le 0) { $pm = 1.0 }; $g.DrawString("Volumen estimado por nivel (ahora)", $font, $gray, [single]$xp0, [single]($y0 - 18))
+    $bUp = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(210, 239, 83, 80)); $bDn = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(210, 38, 166, 154))
+    for ($r = 0; $r -lt $d.nR; $r++) { if ($prof[$r] -le 0) { continue }; $bl = [Math]::Max(1.0, $xpw * $prof[$r] / $pm); $br = if ($r + 0.5 -gt $pr) { $bUp } else { $bDn }; $g.FillRectangle($br, [single]$xp0, [single]($y1 - ($r + 1) * $chh), [single]$bl, [single]([Math]::Max(1.2, $chh))) }
+    $pkI = Get-LiqPeaks $d 4; $fs = New-Object System.Drawing.Font 'Segoe UI', 8.5, ([System.Drawing.FontStyle]::Bold)
+    foreach ($side in @('up', 'dn')) { $col = if ($side -eq 'up') { [System.Drawing.Color]::FromArgb(150, 255, 120, 120) } else { [System.Drawing.Color]::FromArgb(150, 110, 230, 200) }; $pl = New-Object System.Drawing.Pen $col, 1; $pl.DashStyle = 'Dash'
+        foreach ($p in @($pkI[$side])) { $yy = $y1 - ($p.price - $d.pmin) / ($d.step * $d.nR) * ($y1 - $y0); $g.DrawLine($pl, [single]$x0, [single]$yy, [single]($xp0 + $xpw), [single]$yy)
+            $lab = "{0} · {1}" -f (TaFp $p.price), (Format-LiqShort $p.usd); $g.FillRectangle([System.Drawing.Brushes]::Black, [single]($xp0 + 2), [single]($yy - 18), [single]($xpw - 4), [single]15); $g.DrawString($lab, $fs, $white, [single]($xp0 + 4), [single]($yy - 18)) } }
     $g.DrawString(("{0}/USDT · Mapa de liquidaciones ESTIMADO · {1}" -f $d.coin, $d.win.label), $fontB, $white, 14, 10)
     $g.DrawString("Más claro = más liquidaciones estimadas · modelo con " + $d.fuente, $font, $gray, 14, 30)
     $g.Dispose(); $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose(); return $path
@@ -94,19 +105,20 @@ function Resolve-LiqCoin([string]$coin) {      # "SQQ" -> "SQQQ": si no es un fu
     return $coin
 }
 function Handle-Liquidez($args1, $chat, $token) {
-    $coin = 'BTC'; $wins = @('24h', '3d')
+    $coin = 'BTC'; $wins = @('3d', '30d')
     foreach ($w in @($args1)) { $s = "$w".Trim(); if (-not $s) { continue }; if (Get-LiqWin $s) { $wins = @($s) } else { $coin = ($s -replace 'USDT$', '' -replace '[^A-Za-z0-9]', '').ToUpper() } }
     $coin = Resolve-LiqCoin $coin
     foreach ($w in $wins) {
         $win = Get-LiqWin $w; $d = $null; try { $d = Get-LiqHeat $coin $win } catch { $d = $null }
         if (-not $d) { Send-Tg $token $chat "No he podido construir el mapa de $coin ($w): compruebo que sea un futuro de Bitunix con historial suficiente." $null; continue }
         $path = Join-Path ([IO.Path]::GetTempPath()) ("liq-" + [guid]::NewGuid().ToString('N') + ".png"); $img = New-LiqImage $d $path
-        $pk = Get-LiqPeaks $d 5
+        $pk = Get-LiqPeaks $d 8
         $lvl = { param($lst) if (-not @($lst).Count) { return "   (sin acumulaciones relevantes)" }; return ((@($lst) | Sort-Object { [Math]::Abs([double]$_.pct) } | ForEach-Object { "   {0,-12} {1,7}   ≈ {2}" -f (TaFp $_.price), ("{0:+0.0;-0.0}%" -f $_.pct), (Format-LiqUsd $_.usd) }) -join "`n") }
-        $b5 = Get-LiqBalance $d 5; $b10 = Get-LiqBalance $d 10
+        $b5 = Get-LiqBalance $d 5; $b10 = Get-LiqBalance $d 10; $b20 = Get-LiqBalance $d 20
         $bal = { param($b) $tot = $b.up + $b.dn; if ($tot -le 0) { return "sin datos" }; $big = if ($b.up -ge $b.dn) { "ENCIMA" } else { "DEBAJO" }; $rt = if ($b.up -ge $b.dn) { $b.up / [Math]::Max($b.dn, 1e-9) } else { $b.dn / [Math]::Max($b.up, 1e-9) }; return ("▲ {0} · ▼ {1} → más volumen {2} ({3:N1}×)" -f (Format-LiqUsd $b.up), (Format-LiqUsd $b.dn), $big, $rt) }
+        $all = @(@($pk.up) + @($pk.dn)) | Sort-Object { [double]$_.usd } -Descending; $topTxt = if (@($all).Count) { $t1 = @($all)[0]; "{0} ({1:+0.0;-0.0}%) ≈ {2} · {3}" -f (TaFp $t1.price), $t1.pct, (Format-LiqUsd $t1.usd), $(if ($t1.pct -gt 0) { "encima: liquidaciones de cortos" } else { "debajo: liquidaciones de largos" }) } else { "—" }
         $read = ""; $tot5 = $b5.up + $b5.dn; if ($tot5 -gt 0) { if ($b5.up -ge 1.3 * $b5.dn) { $read = "Lectura orientativa: hay más liquidez estimada ENCIMA del precio (liquidaciones de cortos): el precio tiende a ser atraído hacia allí, y una subida puede acelerarse si la alcanza." } elseif ($b5.dn -ge 1.3 * $b5.up) { $read = "Lectura orientativa: hay más liquidez estimada DEBAJO del precio (liquidaciones de largos): el precio tiende a ser atraído hacia allí, y una caída puede acelerarse si la alcanza." } else { $read = "Lectura orientativa: el volumen estimado está equilibrado a ambos lados (sin imán claro)." } }
-        $txt = ("💧 MAPA DE LIQUIDACIONES ESTIMADO · {0}/USDT · {1}`n📍 Precio ahora: {2}`n`n▲ ENCIMA (liquidaciones de CORTOS) · volumen estimado por nivel:`n{3}`n`n▼ DEBAJO (liquidaciones de LARGOS) · volumen estimado por nivel:`n{4}`n`n⚖️ Balance dentro de ±5%: {5}`n⚖️ Balance dentro de ±10%: {6}`n{7}`n`nCifras en USDT (≈ dólares). Modelo con {8}: NO son datos reales de liquidaciones (eso solo lo dan los mapas de pago tipo Coinglass). Úsalo como orientación de hacia dónde puede ir a buscar liquidez el precio, no como señal; sin ventaja predictiva medida." -f $coin, $win.label, (TaFp $d.px), (& $lvl $pk.up), (& $lvl $pk.dn), (& $bal $b5), (& $bal $b10), $read, $d.fuente)
+        $txt = ("💧 MAPA DE LIQUIDACIONES ESTIMADO · {0}/USDT · {1}`n📍 Precio ahora: {2}`n`n▲ ENCIMA (liquidaciones de CORTOS) · volumen estimado por nivel:`n{3}`n`n▼ DEBAJO (liquidaciones de LARGOS) · volumen estimado por nivel:`n{4}`n`n⚖️ Balance dentro de ±5%: {5}`n⚖️ Balance dentro de ±10%: {6}`n⚖️ Balance dentro de ±20%: {9}`n🎯 Mayor nivel: {10}`n{7}`n`nCifras en USDT (≈ dólares). Modelo con {8}: NO son datos reales de liquidaciones (eso solo lo dan los mapas de pago tipo Coinglass). Úsalo como orientación de hacia dónde puede ir a buscar liquidez el precio, no como señal; sin ventaja predictiva medida." -f $coin, $win.label, (TaFp $d.px), (& $lvl $pk.up), (& $lvl $pk.dn), (& $bal $b5), (& $bal $b10), $read, $d.fuente, (& $bal $b20), $topTxt)
         if ($img) { $cap = ("{0}/USDT · mapa de liquidaciones estimado · {1}" -f $coin, $win.label); $ok = Send-TelegramPhoto $token $chat $img $cap; try { Remove-Item $img -Force } catch {}; if (-not $ok) { $txt = "(No he podido enviar la imagen.)`n" + $txt } } else { $txt = "(Este entorno no puede dibujar la imagen.)`n" + $txt }
         Send-Tg $token $chat $txt $null
     }
