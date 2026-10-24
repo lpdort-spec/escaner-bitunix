@@ -283,6 +283,8 @@ function Scan($iv) {
             if (-not $side) { continue }
 
             $sgn = if ($side -eq "LONG") { 1 } else { -1 }
+            # corrida ya acumulada a favor de la señal en las últimas 24 velas (caída si es corto, subida si es largo), en % (aviso de extensión, 24/10/2026)
+            $runPct = 0.0; try { $w24b = @($closed[([Math]::Max(0, $n - 24))..($n - 1)]); if ($side -eq "SHORT") { $mxb = ($w24b | ForEach-Object { [double]$_.high } | Measure-Object -Maximum).Maximum; if ($px -gt 0) { $runPct = ($mxb / $px - 1) * 100 } } else { $mnb = ($w24b | ForEach-Object { [double]$_.low } | Measure-Object -Minimum).Minimum; if ($mnb -gt 0) { $runPct = ($px / $mnb - 1) * 100 } } } catch {}
             # --- Entrada: orden limit en el nivel roto (retesteo) ---
             $dist = if ($strat -eq "barrido") { [Math]::Min(0.5 * $atr, 0.5 * [Math]::Abs($px - $level)) } else { [Math]::Min(1.0 * $atr, [Math]::Abs($px - $level)) }
             $entryType = "mercado"; $entry = $px
@@ -313,6 +315,19 @@ function Scan($iv) {
             $feeShare = $FeeRT / $slPct * 100                               # comisiones / ganancia en TP1
             if ($feeShare -gt $MaxFeeShare) { $rej.fee++; continue }
 
+            # Rupturas CORTAS en 4h: observación silenciosa (backtest 24/10/2026: -0,10R en 118 pares y -0,15R en 10 majors a 3 años; sin ventaja). Se registran para medirlas con datos reales, sin enviar nada.
+            if ($iv -eq "4h" -and $strat -eq "ruptura" -and $side -eq "SHORT") {
+                $seen[$key] = $true; $obsId = "rco-$key"
+                if (-not (@(Read-Signals | Where-Object { $_.id -eq $obsId }).Count)) {
+                    Add-SignalRecord ([ordered]@{
+                        id = $obsId; time = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(); sym = $t.symbol; tf = $iv; strat = "arranque-obs"; side = $sgn
+                        entryType = $entryType; entry = $entry; sl = $sl; tp1 = $tp1; tp2 = $tp2; tp3 = $tp3; riskAbs = $risk; slPct = $slPct; lev = 1
+                        status = $(if ($entryType -eq "limit") { "pending" } else { "open" }); stage = 0; realized = 0.0; age = 0; lastLabel = [long]$last.time; lab0 = [long]$last.time; cost = 0.0015
+                        outcome = $null; R = $null; net = $null; ctxFlags = ("ruptura-corto-4h;corrida24={0:N1}%" -f $runPct).Replace(",", "."); note = "observación silenciosa: ruptura corta 4h (tercios 1R/2R/3R + BE)"
+                    })
+                }
+                continue
+            }
             $fund = Get-Funding $t.symbol
             $book = Get-BookBias $t.symbol
             $ctx = @()
@@ -366,12 +381,13 @@ function Scan($iv) {
             $scSig = Get-SignalScore $name 'cripto' $sgn ([double]$entry)
             $slNote = $null; try { if (Get-Command Get-SlClusterNote -ErrorAction SilentlyContinue) { $slNote = Get-SlClusterNote $sgn $name $entry $sl $atr ([double]$entry) } } catch {}      # solo advertencia: el SL de las rupturas está validado en backtest y no se modifica
             $roiNote = if ($roi2 -lt 25) { ("ROI esperado en TP2 ≈ {0:N0}% del margen con x{1}: es bajo porque tu regla limita la pérdida al 20% del margen y el apalancamiento se acota por volatilidad. La ventaja de la táctica está en el R (1R/2R/3R), no en el ROI." -f $roi2, $lev) } else { $null }
+            $extNote = $null; if ($runPct -ge 5) { $extNote = ("⚠️ El precio ya ha {0} un {1:N1}% en las últimas 24 velas (≈4 días): entras tras un movimiento largo. El orden limit espera el retesteo y puede no llegar a rellenarse; si lo hace, el recorrido restante puede ser menor." -f $(if ($side -eq "SHORT") { "caído" } else { "subido" }), $runPct) }
             $mgmtNote = "Gestión: margen aislado (máx. $(Get-MargenMax) USDT), SL puesto en Bitunix, un tercio en cada TP y SL a la entrada tras el TP1."      # solo para tu chat privado
-            $msg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto' $iv @($slNote, $roiNote, $mgmtNote)
+            $msg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto' $iv @($slNote, $extNote, $roiNote, $mgmtNote)
             $genMsg = $null
             if ($iv -eq "4h" -and $strat -eq "ruptura" -and $script:MktChat) {      # grupo Alertas Mercados: misma señal sin instrucciones personales ni mención a otros chats
                 $roiNoteG = if ($roi2 -lt 25) { ("ROI esperado en TP2 ≈ {0:N0}% del margen con x{1}: es bajo porque el apalancamiento recomendado limita la pérdida del SL al 20% del margen. La ventaja de la táctica está en el R (1R/2R/3R), no en el ROI." -f $roi2, $lev) } else { $null }
-                $genMsg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto' $iv @($slNote, $roiNoteG) }
+                $genMsg = Format-CompactSignal $sgn ("{0}/USDT · {1}" -f $name, $iv) $scSig $entry ($entryType -eq "limit") $lev $sl $tp1 $tp2 $tp3 'cripto' $iv @($slNote, $extNote, $roiNoteG) }
             $photo = $null
             if (Test-SignalDup $t.symbol $sgn $key 24) { $seen[$key] = $true; continue }      # ya hay una señal de esta moneda y dirección (otro marco, vela anterior o tras un reinicio): no se repite
             if (Send-Alert $key $msg $photo) {
