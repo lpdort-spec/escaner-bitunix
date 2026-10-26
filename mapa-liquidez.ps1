@@ -105,7 +105,7 @@ function Resolve-LiqCoin([string]$coin) {      # "SQQ" -> "SQQQ": si no es un fu
     return $coin
 }
 function Handle-Liquidez($args1, $chat, $token) {
-    $coin = 'BTC'; $wins = @('3d', '30d')
+    $coin = 'BTC'; $wins = @('7d')
     foreach ($w in @($args1)) { $s = "$w".Trim(); if (-not $s) { continue }; if (Get-LiqWin $s) { $wins = @($s) } else { $coin = ($s -replace 'USDT$', '' -replace '[^A-Za-z0-9]', '').ToUpper() } }
     $coin = Resolve-LiqCoin $coin
     foreach ($w in $wins) {
@@ -113,12 +113,26 @@ function Handle-Liquidez($args1, $chat, $token) {
         if (-not $d) { Send-Tg $token $chat "No he podido construir el mapa de $coin ($w): compruebo que sea un futuro de Bitunix con historial suficiente." $null; continue }
         $path = Join-Path ([IO.Path]::GetTempPath()) ("liq-" + [guid]::NewGuid().ToString('N') + ".png"); $img = New-LiqImage $d $path
         $pk = Get-LiqPeaks $d 8
-        $lvl = { param($lst) if (-not @($lst).Count) { return "   (sin acumulaciones relevantes)" }; return ((@($lst) | Sort-Object { [Math]::Abs([double]$_.pct) } | ForEach-Object { "   {0,-12} {1,7}   ≈ {2}" -f (TaFp $_.price), ("{0:+0.0;-0.0}%" -f $_.pct), (Format-LiqUsd $_.usd) }) -join "`n") }
+        $es = [Globalization.CultureInfo]::GetCultureInfo('es-ES'); $fp = { param($p) ([double]$p).ToString('+0.0;-0.0', $es) + '%' }
+        $lvl = { param($lst) if (-not @($lst).Count) { return "   (sin acumulaciones relevantes)" }; return ((@($lst) | Sort-Object { [Math]::Abs([double]$_.pct) } | ForEach-Object { "   {0,-12} {1,7}   ≈ {2}" -f (TaFp $_.price), (& $fp $_.pct), (Format-LiqUsd $_.usd) }) -join "`n") }
+        $upL = @($pk.up); $dnL = @($pk.dn)
+        $sUp = 0.0; foreach ($x in $upL) { $sUp += [double]$x.usd }; $sDn = 0.0; foreach ($x in $dnL) { $sDn += [double]$x.usd }
         $b5 = Get-LiqBalance $d 5; $b10 = Get-LiqBalance $d 10; $b20 = Get-LiqBalance $d 20
-        $bal = { param($b) $tot = $b.up + $b.dn; if ($tot -le 0) { return "sin datos" }; $big = if ($b.up -ge $b.dn) { "ENCIMA" } else { "DEBAJO" }; $rt = if ($b.up -ge $b.dn) { $b.up / [Math]::Max($b.dn, 1e-9) } else { $b.dn / [Math]::Max($b.up, 1e-9) }; return ("▲ {0} · ▼ {1} → más volumen {2} ({3:N1}×)" -f (Format-LiqUsd $b.up), (Format-LiqUsd $b.dn), $big, $rt) }
-        $all = @(@($pk.up) + @($pk.dn)) | Sort-Object { [double]$_.usd } -Descending; $topTxt = if (@($all).Count) { $t1 = @($all)[0]; "{0} ({1:+0.0;-0.0}%) ≈ {2} · {3}" -f (TaFp $t1.price), $t1.pct, (Format-LiqUsd $t1.usd), $(if ($t1.pct -gt 0) { "encima: liquidaciones de cortos" } else { "debajo: liquidaciones de largos" }) } else { "—" }
+        $bal = { param($b) $tot = $b.up + $b.dn; if ($tot -le 0) { return "sin datos" }; $big = if ($b.up -ge $b.dn) { "ENCIMA" } else { "DEBAJO" }; $hi = [Math]::Max($b.up, $b.dn); $lo = [Math]::Min($b.up, $b.dn); $rt = if ($lo -lt 0.001 * $hi) { "casi sin volumen en el otro lado" } else { ("{0:N1}×" -f ($hi / $lo)) }; return ("▲ {0} · ▼ {1} → más volumen {2} ({3})" -f (Format-LiqUsd $b.up), (Format-LiqUsd $b.dn), $big, $rt) }
+        # RESUMEN en lenguaje llano: totales de los niveles listados, diferencia, nivel mayor, niveles más cercanos y huecos
+        $R = @()
+        $R += ("• Encima ({0} niveles): {1}  ·  Debajo ({2} niveles): {3}" -f $upL.Count, (Format-LiqUsd $sUp), $dnL.Count, (Format-LiqUsd $sDn))
+        if ($sUp -gt 0 -and $sDn -gt 0) { $mx = [Math]::Max($sUp, $sDn); $mn = [Math]::Min($sUp, $sDn); $R += ("• Hay {0} más {1} ({2:N2} veces el volumen del otro lado)." -f (Format-LiqUsd ($mx - $mn)), $(if ($sUp -ge $sDn) { "ENCIMA" } else { "DEBAJO" }), ($mx / $mn)) }
+        elseif ($sUp -gt 0 -or $sDn -gt 0) { $R += ("• Solo hay niveles {0} del precio." -f $(if ($sUp -gt 0) { "ENCIMA" } else { "DEBAJO" })) }
+        $allL = @(@($upL | ForEach-Object { @{ price = $_.price; pct = $_.pct; usd = $_.usd; up = $true } }) + @($dnL | ForEach-Object { @{ price = $_.price; pct = $_.pct; usd = $_.usd; up = $false } })) | Sort-Object { [double]$_.usd } -Descending
+        if (@($allL).Count) { $t1 = @($allL)[0]; $R += ("• Nivel mayor: {0} ({1}) ≈ {2} ({3})." -f (TaFp $t1.price), (& $fp $t1.pct), (Format-LiqUsd $t1.usd), $(if ($t1.up) { "liquidaciones de cortos, encima" } else { "liquidaciones de largos, debajo" })) }
+        $nu = @($upL | Sort-Object { [double]$_.pct } | Select-Object -First 1); $nd = @($dnL | Sort-Object { [double]$_.pct } -Descending | Select-Object -First 1)
+        if ($nu.Count -and $nd.Count) { $R += ("• Más cercanos al precio: arriba {0} ({1}) ≈ {2} · abajo {3} ({4}) ≈ {5}." -f (TaFp $nu[0].price), (& $fp $nu[0].pct), (Format-LiqUsd $nu[0].usd), (TaFp $nd[0].price), (& $fp $nd[0].pct), (Format-LiqUsd $nd[0].usd)) }
+        if ($nu.Count -and [double]$nu[0].pct -ge 3) { $R += ("• Entre el precio y {0} no aparece ningún nivel relevante arriba." -f (& $fp $nu[0].pct)) }
+        if ($nd.Count -and [double]$nd[0].pct -le -3) { $R += ("• Entre el precio y {0} no aparece ningún nivel relevante abajo." -f (& $fp $nd[0].pct)) }
+        $R += "• Estas sumas solo cubren los niveles listados; el balance de abajo se calcula sobre todo el rango y puede no coincidir."
         $read = ""; $tot5 = $b5.up + $b5.dn; if ($tot5 -gt 0) { if ($b5.up -ge 1.3 * $b5.dn) { $read = "Lectura orientativa: hay más liquidez estimada ENCIMA del precio (liquidaciones de cortos): el precio tiende a ser atraído hacia allí, y una subida puede acelerarse si la alcanza." } elseif ($b5.dn -ge 1.3 * $b5.up) { $read = "Lectura orientativa: hay más liquidez estimada DEBAJO del precio (liquidaciones de largos): el precio tiende a ser atraído hacia allí, y una caída puede acelerarse si la alcanza." } else { $read = "Lectura orientativa: el volumen estimado está equilibrado a ambos lados (sin imán claro)." } }
-        $txt = ("💧 MAPA DE LIQUIDACIONES ESTIMADO · {0}/USDT · {1}`n📍 Precio ahora: {2}`n`n▲ ENCIMA (liquidaciones de CORTOS) · volumen estimado por nivel:`n{3}`n`n▼ DEBAJO (liquidaciones de LARGOS) · volumen estimado por nivel:`n{4}`n`n⚖️ Balance dentro de ±5%: {5}`n⚖️ Balance dentro de ±10%: {6}`n⚖️ Balance dentro de ±20%: {9}`n🎯 Mayor nivel: {10}`n{7}`n`nCifras en USDT (≈ dólares). Modelo con {8}: NO son datos reales de liquidaciones (eso solo lo dan los mapas de pago tipo Coinglass). Úsalo como orientación de hacia dónde puede ir a buscar liquidez el precio, no como señal; sin ventaja predictiva medida." -f $coin, $win.label, (TaFp $d.px), (& $lvl $pk.up), (& $lvl $pk.dn), (& $bal $b5), (& $bal $b10), $read, $d.fuente, (& $bal $b20), $topTxt)
+        $txt = ("💧 MAPA DE LIQUIDACIONES ESTIMADO · {0}/USDT · {1}`n📍 Precio ahora: {2}`n`n▲ ENCIMA (liquidaciones de CORTOS) · volumen estimado por nivel:`n{3}`n   Total de estos niveles: {4}`n`n▼ DEBAJO (liquidaciones de LARGOS) · volumen estimado por nivel:`n{5}`n   Total de estos niveles: {6}`n`n📊 RESUMEN`n{7}`n`n⚖️ Balance dentro de ±5%: {8}`n⚖️ Balance dentro de ±10%: {9}`n⚖️ Balance dentro de ±20%: {10}`n{11}`n`nCifras en USDT (≈ dólares). Modelo con {12}: NO son datos reales de liquidaciones (eso solo lo dan los mapas de pago tipo Coinglass). Úsalo como orientación de hacia dónde puede ir a buscar liquidez el precio, no como señal; sin ventaja predictiva medida." -f $coin, $win.label, (TaFp $d.px), (& $lvl $pk.up), (Format-LiqUsd $sUp), (& $lvl $pk.dn), (Format-LiqUsd $sDn), ($R -join "`n"), (& $bal $b5), (& $bal $b10), (& $bal $b20), $read, $d.fuente)
         if ($img) { $cap = ("{0}/USDT · mapa de liquidaciones estimado · {1}" -f $coin, $win.label); $ok = Send-TelegramPhoto $token $chat $img $cap; try { Remove-Item $img -Force } catch {}; if (-not $ok) { $txt = "(No he podido enviar la imagen.)`n" + $txt } } else { $txt = "(Este entorno no puede dibujar la imagen.)`n" + $txt }
         Send-Tg $token $chat $txt $null
     }

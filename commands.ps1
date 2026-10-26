@@ -172,7 +172,7 @@ $script:HelpText = @"
 /opinion LARGO|CORTO SIMBOLO [PRECIO] · te doy mi opinión sobre una idea (sin SL, TP ni apalancamiento; no es una alerta). Ej.: /opinion largo BTC 85500 · /opinion corto TSLA 250
 /traders [SIMBOLO] · posicionamiento de los mejores traders: BTC y ETH sin argumentos; también cripto o acciones de EE. UU. (ej.: /traders TSLA)
 /ballenas [MONEDA] · posiciones de las mayores carteras de Hyperliquid (únicas públicas): cuánto hay en largo y en corto y las mayores posiciones. Ej.: /ballenas BTC
-/liquidez [MONEDA] [24h|3d|7d|30d] · mapa de calor de liquidaciones ESTIMADO (imagen estilo Coinglass; modelo con interés abierto, no datos reales). Sin argumentos: BTC en 24h y 3d. Ej.: /liquidez ETH 7d. También puedes escribir «mapa liquidez SQQQ» (o «mapa liquidez ETH 7d»); si pones SQQ y solo existe SQQQ, uso ese
+/liquidez [MONEDA] [24h|3d|7d|30d] · mapa de calor de liquidaciones ESTIMADO (imagen estilo Coinglass; modelo con interés abierto, no datos reales). Sin argumentos: BTC a 7 días (un solo mapa con niveles y resumen). Ej.: /liquidez ETH 7d. También puedes escribir «mapa liquidez SQQQ» (o «mapa liquidez ETH 7d»); si pones SQQ y solo existe SQQQ, uso ese
 /ayuda · esta ayuda
 /id · muestra el identificador del chat
 
