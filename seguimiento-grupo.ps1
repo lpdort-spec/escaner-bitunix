@@ -140,6 +140,7 @@ function Check-SignalHealth {
             $m += "`nEl bot no cierra nada: decides tú. Regla del aviso: el lado de la operación puntúa 0 o menos y el contrario 6 o más."
             $toPriv = (-not $isStock) -and ($s.strat -ne 'seg-grupo'); $toGroup = ($isStock) -or ($s.strat -eq 'seg-grupo') -or ($s.strat -eq 'aviso-momento') -or ($s.strat -eq 'ruptura' -and $s.tf -eq '4h')
             if ($s.manual -eq $true) { $toPriv = $true; $toGroup = $false }
+            elseif ($s.strat -ne 'seg-priv') { $toPriv = $false }      # (27/10) al privado solo cambios de órdenes tomadas por el usuario
             if ($toPriv) { Send-ToSignalChats $m }
             if ($toGroup -and $script:MktChat) { Send-Tg $TelegramToken $script:MktChat $m $null }
             $warned += $s.id
@@ -171,6 +172,7 @@ function Review-OpenPositions {
     $desde0 = Get-DesdeEpoch; foreach ($s in @(Read-Signals | Where-Object { $_.status -eq 'open' -and $_.strat -in 'seg-priv', 'ruptura', 'ruptura-mercado', 'aviso-momento', 'seg-grupo', 'tomada' -and -not ($_.strat -eq 'tomada' -and $_.origen -eq 'operacion') -and ($_.strat -ne 'tomada' -or [long]$_.time -ge $desde0) })) {
         try {
             if ($s.strat -ne 'tomada' -and $s.manual -ne $true -and -not (Test-SignalOldEnough $s)) { continue }      # una señal recién emitida no se "gestiona" hasta que pasen dos velas
+            if ($s.strat -notin 'tomada', 'seg-priv' -and $s.manual -ne $true) { continue }      # (27/10) solo órdenes que el usuario ha tomado: nada de gestión de señales que no operó
             $dest = Get-RecDest $s; $dest = @{ priv = $dest.priv; group = $false }      # los ajustes de SL/TP y la protección por noticias son solo para el chat privado; al grupo solo van señales, resultados y avisos de cerrar
             if (-not $dest.priv) { continue }
             $isStock = ($s.src -eq 'yahoo'); $sym = $s.sym -replace 'USDT$', ''; $sg = [int]$s.side
