@@ -1,14 +1,14 @@
 ﻿[
-    "DOTUSDT-4h-1792843200000",
-    "BCHUSDT-4h-1792843200000",
+    "XMRUSDT-4h-1793721600000",
     {
         "value":  [
+                      "DOTUSDT-4h-1792843200000",
+                      "BCHUSDT-4h-1792843200000",
                       {
-                          "value":  "METAUSDT-4h-1792670400000  SNXXUSDT-4h-1792670400000 MUUSDT-4h-1792670400000 SOXLUSDT-4h-1792670400000 AMDUSDT-4h-1792670400000 TQQQUSDT-4h-1792670400000 SQQQUSDT-4h-1792670400000 SNDKUSDT-4h-1792670400000",
-                          "Count":  9
-                      },
-                      "DASHUSDT-4h-1792713600000"
+                          "value":  " DASHUSDT-4h-1792713600000",
+                          "Count":  2
+                      }
                   ],
-        "Count":  2
+        "Count":  3
     }
 ]
