@@ -1,52 +1,52 @@
-﻿📈 BACKTEST SEMANAL · 2026-11-02
-Datos reales de Bitunix: 96 series · historia ~100 días en 1h y ~233 días en 4h · comisiones 0,10-0,15% incluidas.
+﻿📈 BACKTEST SEMANAL · 2026-11-09
+Datos reales de Bitunix: 98 series · historia ~100 días en 1h y ~233 días en 4h · comisiones 0,10-0,15% incluidas.
 Esperanza = ganancia media por operación en R (1R = lo que arriesgas hasta el SL), cerrando un tercio en TP1, TP2 y TP3. 'Fuera de muestra' = último 40% del tiempo.
 
 ▶ ACTUAL (la que usa el bot)
-   1h: 40 operaciones · llegan a 1,5R el 48% · esperanza +0.18R · fuera de muestra -0.14R
-   4h: 61 operaciones · llegan a 1,5R el 52% · esperanza +0.23R · fuera de muestra +0.57R
+   1h: 39 operaciones · llegan a 1,5R el 44% · esperanza +0.11R · fuera de muestra +0.19R
+   4h: 65 operaciones · llegan a 1,5R el 63% · esperanza +0.55R · fuera de muestra +0.84R
 ▶ volumen minimo x2.5
-   1h: 21 operaciones · llegan a 1,5R el 48% · esperanza +0.12R · fuera de muestra +0.25R
-   4h: 26 operaciones · llegan a 1,5R el 62% · esperanza +0.27R · fuera de muestra +0.74R
+   1h: 24 operaciones · llegan a 1,5R el 42% · esperanza -0.06R · fuera de muestra +0.22R
+   4h: 32 operaciones · llegan a 1,5R el 69% · esperanza +0.69R · fuera de muestra +1.20R
 ▶ SL minimo 1.5%
-   1h: 9 operaciones · llegan a 1,5R el 67% · esperanza +0.36R · fuera de muestra +1.11R
-   4h: 36 operaciones · llegan a 1,5R el 53% · esperanza +0.21R · fuera de muestra +0.50R
+   1h: 8 operaciones · llegan a 1,5R el 38% · esperanza -0.18R · fuera de muestra -0.17R
+   4h: 38 operaciones · llegan a 1,5R el 68% · esperanza +0.66R · fuera de muestra +1.11R
 ▶ rango de 10 velas
-   1h: 41 operaciones · llegan a 1,5R el 59% · esperanza +0.41R · fuera de muestra +0.23R
-   4h: 75 operaciones · llegan a 1,5R el 52% · esperanza +0.22R · fuera de muestra +0.36R
+   1h: 44 operaciones · llegan a 1,5R el 52% · esperanza +0.28R · fuera de muestra +0.07R
+   4h: 73 operaciones · llegan a 1,5R el 67% · esperanza +0.60R · fuera de muestra +0.75R
 ▶ sin filtro de tendencia
-   1h: 72 operaciones · llegan a 1,5R el 50% · esperanza +0.24R · fuera de muestra +0.02R
-   4h: 115 operaciones · llegan a 1,5R el 47% · esperanza +0.09R · fuera de muestra +0.39R
+   1h: 65 operaciones · llegan a 1,5R el 49% · esperanza +0.25R · fuera de muestra +0.21R
+   4h: 119 operaciones · llegan a 1,5R el 55% · esperanza +0.34R · fuera de muestra +0.52R
 ▶ entrada a mercado (comparacion)
-   1h: 274 operaciones · llegan a 1,5R el 36% · esperanza -0.23R · fuera de muestra -0.26R
-   4h: 202 operaciones · llegan a 1,5R el 44% · esperanza -0.04R · fuera de muestra -0.03R
+   1h: 274 operaciones · llegan a 1,5R el 37% · esperanza -0.21R · fuera de muestra -0.12R
+   4h: 220 operaciones · llegan a 1,5R el 49% · esperanza +0.08R · fuera de muestra +0.10R
 ▶ barrido de liquidez (experimental)
-   1h: 100 operaciones · llegan a 1,5R el 45% · esperanza +0.04R · fuera de muestra +0.15R
-   4h: 77 operaciones · llegan a 1,5R el 40% · esperanza -0.03R · fuera de muestra -0.22R
+   1h: 101 operaciones · llegan a 1,5R el 46% · esperanza +0.10R · fuera de muestra +0.44R
+   4h: 79 operaciones · llegan a 1,5R el 44% · esperanza +0.07R · fuera de muestra -0.03R
 
-🔶 VEREDICTO: resultado mixto (positiva en conjunto pero no fuera de muestra, o muestra muy pequeña). Se mantiene en observación.
-Semana anterior (2026-10-26): 1h -0.01R · 4h +0.31R   →   ahora: 1h +0.18R · 4h +0.23R
+✅ VEREDICTO: la configuración actual sigue con esperanza positiva en 1h y 4h, también fuera de muestra.
+Semana anterior (2026-11-02): 1h +0.18R · 4h +0.23R   →   ahora: 1h +0.11R · 4h +0.55R
 
 📊 ACIERTOS REALES DEL BOT (señales enviadas, evaluadas con las velas posteriores):
 RESULTADOS DE LAS SEÑALES (descontando comisiones)
-Cerradas: 24 | abiertas: 1 | sin ejecutar: 12
-TOTAL                      n=24  llegan a TP1= 46%  esperanza=  0.42R
-estrategia ruptura         n=20  llegan a TP1= 40%  esperanza=  0.31R
+Cerradas: 26 | abiertas: 1 | sin ejecutar: 16
+TOTAL                      n=26  llegan a TP1= 42%  esperanza=  0.35R
+estrategia ruptura         n=22  llegan a TP1= 36%  esperanza=  0.24R
 estrategia arranque        n=4   llegan a TP1= 75%  esperanza=  0.95R
-temporalidad 1d            n=11  llegan a TP1=  9%  esperanza= -0.25R
+temporalidad 1d            n=12  llegan a TP1=  8%  esperanza= -0.23R
 temporalidad 1h            n=6   llegan a TP1= 83%  esperanza=  1.02R
-temporalidad 4h            n=7   llegan a TP1= 71%  esperanza=  0.96R
-tendencia 4h               n=15  llegan a TP1= 27%  esperanza=  0.07R
-tendencia 4h alcista       n=7   llegan a TP1= 86%  esperanza=  1.16R
+temporalidad 4h            n=8   llegan a TP1= 63%  esperanza=  0.70R
+tendencia 4h               n=16  llegan a TP1= 25%  esperanza=  0.07R
+tendencia 4h alcista       n=8   llegan a TP1= 75%  esperanza=  0.88R
 tendencia 4h bajista       n=1   llegan a TP1=100%  esperanza=  1.96R
 tendencia 4h lateral       n=1   llegan a TP1=  0%  esperanza= -1.07R
-riesgo moneda              n=15  llegan a TP1= 27%  esperanza=  0.07R
+riesgo moneda              n=16  llegan a TP1= 25%  esperanza=  0.07R
 riesgo moneda ALTO         n=8   llegan a TP1= 88%  esperanza=  1.26R
-riesgo moneda MEDIO        n=1   llegan a TP1=  0%  esperanza= -1.05R
-lado LONG                  n=23  llegan a TP1= 43%  esperanza=  0.35R
+riesgo moneda MEDIO        n=2   llegan a TP1=  0%  esperanza= -1.07R
+lado LONG                  n=25  llegan a TP1= 40%  esperanza=  0.28R
 lado SHORT                 n=1   llegan a TP1=100%  esperanza=  1.96R
-BTC neutro                 n=19  llegan a TP1= 37%  esperanza=  0.17R
-contra BTC                 n=5   llegan a TP1= 80%  esperanza=  1.37R
+BTC neutro                 n=20  llegan a TP1= 35%  esperanza=  0.16R
+contra BTC                 n=6   llegan a TP1= 67%  esperanza=  0.96R
 
 Con un tercio en cada TP y SL a entrada tras TP1, el equilibrio exige llegar a TP1 en ~50% de las señales.
 
