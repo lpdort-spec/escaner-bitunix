@@ -1,13 +1,17 @@
 ﻿[
-    "ERAUSDT-4h-1794110400000",
+    "LINKUSDT-4h-1794657600000",
+    "DOTUSDT-4h-1794657600000",
+    "SUIUSDT-4h-1794657600000",
+    "BCHUSDT-4h-1794657600000",
     {
         "value":  [
+                      "ERAUSDT-4h-1794110400000",
                       {
-                          "value":  "SOXLUSDT-1h-1793804400000  SOXSUSDT-1h-1793804400000",
-                          "Count":  3
-                      },
-                      "HUMAUSDT-1h-1794049200000"
+                          "value":  " HUMAUSDT-1h-1794049200000",
+                          "Count":  2
+                      }
                   ],
         "Count":  2
-    }
+    },
+    "NIGHTUSDT-4h-1794657600000"
 ]
