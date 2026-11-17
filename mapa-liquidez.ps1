@@ -28,7 +28,7 @@ function Get-LiqHeat($coin, $win) {
     $tiers = @(@(5, 0.10), @(10, 0.25), @(25, 0.30), @(50, 0.20), @(100, 0.15))
     for ($q = 1; $q -lt $nC; $q++) {
         $newV = 0.0; if ($oi) { $d = $oi[$q] - $oi[$q - 1]; if ($d -gt 0) { $newV = $d } } else { $newV = $qv[$q] * 0.04 }
-        if ($newV -le 0) { continue }
+        if ($newV -le 0 -or $cum[$q] -le 0) { continue }      # 16/11/2026: si el interés abierto de una vela llega a 0, el factor acumulado $cum se anula y la división $cum[$j] / $cum[$q] daba "Intento de dividir por cero"
         $px = ($hi[$q] + $lo[$q] + $cl[$q]) / 3.0
         foreach ($tr in $tiers) { $wt = $newV * $tr[1] * 0.5
             foreach ($sd in @(1, -1)) {      # 1 = largo (se liquida por debajo), -1 = corto (por encima)

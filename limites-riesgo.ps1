@@ -45,6 +45,10 @@ function Get-MisOperacionesResumen([int]$dias = 7) {
     $out += ("• Mejor: {0} {1:+0;-0} USDT · peor: {2} {3:+0;-0} USDT" -f ($best.sym -replace 'USDT$', ''), [double]$best.pnlUsd, ($worst.sym -replace 'USDT$', ''), [double]$worst.pnlUsd)
     $out += ("• Disciplina: {0} reentrada(s) en la misma moneda en menos de 2 h tras perder · {1} vez(ces) subiste el apalancamiento tras una pérdida" -f $re, $esc)
     if ($gw -gt 0 -and $perd.Count -and [Math]::Abs($gl) / $perd.Count -gt $gw / [Math]::Max(1, $gan.Count)) { $out += "• Ojo: tu pérdida media supera tu ganancia media; con este acierto no sale a cuenta. Corta antes las perdedoras o deja correr más las ganadoras." }
+    # por lado y concentración de pérdidas (16/11/2026: en sus 93 operaciones de 24/10-06/11 los largos sumaban -1.771 USDT y los cortos +347; con la mediana y sin las 5 mayores pérdidas se mantiene)
+    $lg = @($all | Where-Object { [int]$_.side -eq 1 }); $sh = @($all | Where-Object { [int]$_.side -eq -1 })
+    if ($lg.Count -and $sh.Count) { $out += ("• Por lado: largos {0} ops {1:+0;-0;0} USDT ({2:N0}% acierto) · cortos {3} ops {4:+0;-0;0} USDT ({5:N0}% acierto)" -f $lg.Count, ($lg | Measure-Object pnlUsd -Sum).Sum, (100.0 * @($lg | Where-Object { [double]$_.pnlUsd -gt 0 }).Count / $lg.Count), $sh.Count, ($sh | Measure-Object pnlUsd -Sum).Sum, (100.0 * @($sh | Where-Object { [double]$_.pnlUsd -gt 0 }).Count / $sh.Count)) }
+    if ($perd.Count -ge 4 -and $gl -lt 0) { $top = @($perd | Sort-Object { [double]$_.pnlUsd } | Select-Object -First 2); $ts = ($top | Measure-Object pnlUsd -Sum).Sum; $out += ("• Concentración: tus 2 peores operaciones ({0}) suman el {1:N0}% de las pérdidas brutas{2}" -f (($top | ForEach-Object { ($_.sym -replace 'USDT$', '') + " " + ('{0:+0;-0}' -f [double]$_.pnlUsd) }) -join ', '), (100.0 * $ts / $gl), $(if (100.0 * $ts / $gl -ge 40) { ": pocas operaciones grandes deciden el resultado, vigila el tamaño" } else { "" })) }
     $s = Get-LimitesStatus; $out += ("• Semana en curso: {0:+0;-0;0} USDT de {1:N0} de pérdida máxima permitida" -f $s.sem, (Get-LimConfig).sem)
     return ($out -join "`n")
 }
